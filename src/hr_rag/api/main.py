@@ -46,8 +46,8 @@ async def lifespan(_app: FastAPI):
 
 
 app = FastAPI(
-    title="HR Policy Copilot API",
-    description="JWT-secured, RBAC-scoped, Redis-cached RAG API for TechCorp HR policy Q&A.",
+    title="Company Policy Copilot API",
+    description="JWT-secured, RBAC-scoped, Redis-cached RAG API for TechCorp company policy Q&A.",
     version="0.2.0",
     lifespan=lifespan,
 )
@@ -67,4 +67,4 @@ app.include_router(query.router)
 
 @app.get("/")
 def root():
-    return {"service": "HR Policy Copilot API", "docs": "/docs", "health": "/health"}
+    return {"service": "Company Policy Copilot API", "docs": "/docs", "health": "/health"}

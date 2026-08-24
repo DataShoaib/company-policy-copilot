@@ -1,96 +1,65 @@
-# HR Policy Copilot
+# Company Policy Copilot
 
-![CI](https://github.com/datashoaib/hr-policy-copilot/actions/workflows/ci.yml/badge.svg)
+![CI](https://github.com/DataShoaib/company-policy-copilot/actions/workflows/ci.yml/badge.svg)
 ![Python](https://img.shields.io/badge/python-3.10%2B-blue)
+![FastAPI](https://img.shields.io/badge/FastAPI-0.115%2B-009688)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
-RAG system that answers employee questions from company policy docs across HR, Finance, IT, Legal, and Operations. Built this because employees ask the same policy questions repeatedly, so a grounded self-serve bot saves real time.
-
-## What's here
-
-- `notebooks/experiments.ipynb` — compares baseline, hybrid, query rewrite, multi-query, compression, metadata filtering, HyDE and cross-encoder retrieval on a small category-balanced evaluation sample, scored with RAGAS. The notebook uses the same Qdrant collections as the API.
-- `src/hr_rag/` — the actual retrieval/RAG library, shared between the notebook and the API.
-- `src/hr_rag/api/` — FastAPI service with category-scoped Qdrant retrieval, JWT auth, PostgreSQL-backed users, role-based access, Redis caching and rate limiting.
-- `frontend/app.py` — Streamlit client with login and a department selector that sends the selected category to one Qdrant collection.
-- **Observability** — every request's prompt/LLM run is traced to LangSmith (project `HR-RAG-Experiments`: inputs, outputs, token usage, latency); MLflow tracks the retrieval experiments.
-
-## Why it's built this way
-
-The whole point of this tool is that the same handful of questions get asked repeatedly, on a corpus that barely changes. That's what drove most of the decisions:
-
-- **Category-scoped Qdrant retrieval** — each department/subcategory has its own collection, so a finance question does not search IT or Legal. Qdrant payload metadata supports additional filters such as document version or tenant.
-- **Deterministic query routing** — explicit categories are validated first, then known keywords select relevant allowed collections. Ambiguous questions search only the user's allowed collections.
-- **JWT + role-based access** — not all policies are equally sensitive. Compensation has salary bands and bonus formulas that a regular employee shouldn't be pulling up for other grades. Enforced at the retrieval layer, not just the route, so it can't be bypassed by a forgotten check somewhere else.
-- **Redis caching** — the normalized question is the cache key, so identical questions reuse the same LLM output. Before reuse, source categories are checked against the current user's permissions.
-- **Rate limiting** — per user, not per IP (this sits behind auth already, and IP-based limiting breaks behind office VPN/NAT anyway).
-- **Retry, not a circuit breaker** — a couple of retries on a flaky LLM call is enough here. A real circuit breaker matters at a traffic scale this internal tool doesn't have.
-
-Didn't add an agentic multi-hop loop either — most of these questions are single-hop lookups. There's a `cross-policy` slice in the eval set specifically to check multi-hop questions against plain retrieval, and it holds up fine with a decent prompt.
-
-## Layout
+Grounded Q&A over **TechCorp's internal policy corpus** — 9 policy documents across HR, Finance, IT Security, Legal Compliance and Operations. Employees ask the same questions repeatedly; this answers them **only from the official documents**, scoped to what each role is allowed to see.
 
 ```
-data/policies/       9 source policy docs across HR and four departments
-data/eval/           curated multi-department eval set (category, difficulty, question type)
-notebooks/           experiments.ipynb -- retrieval comparisons and RAGAS evaluation
-src/hr_rag/          retrieval library (chunking, embeddings, Qdrant, routing, pipeline)
-src/hr_rag/api/       FastAPI app -- auth, rbac, caching, rate limiting, routes
-scripts/ingest.py    builds the Qdrant collections offline
-tests/               pytest, no API key needed
-docker/, docker-compose.yml
+"How many days of casual leave do I get?"        → grounded answer + sources (cached: ~ms)
+"What is the bonus formula for L4?" as employee  → access denied (RBAC, enforced at retrieval)
 ```
 
-## Running it
+## How it works
+
+```mermaid
+flowchart LR
+    UI["Streamlit client"] -->|JWT Bearer| API["FastAPI<br/>auth · query · health"]
+    API -->|per-user window| RL["Redis<br/>rate limiting"]
+    API -->|scope+question key| C["Redis<br/>answer cache"]
+    API --> P["RAG pipeline"]
+    P -->|"route → allowed collections"| Q[("Qdrant<br/>9 category collections")]
+    P -->|"grounded prompt"| LLM["Groq / Gemini"]
+    API --> DB[("PostgreSQL / SQLite<br/>users + refresh tokens")]
+```
+
+**Request path:** JWT check → rate limit → cache lookup (permission-guarded) → keyword routing over role-allowed categories → per-category vector search → grounded prompt → answer + cited sources.
+
+## Design decisions
+
+- **Category-scoped retrieval** — each department gets its own Qdrant collection; a finance question never searches IT or Legal. Smaller search space, and it's what makes RBAC cheap.
+- **RBAC at the retrieval layer, not the route** — an employee-role request *cannot* reach compensation chunks even if a route check is forgotten; `allowed_categories` bounds every collection touch.
+- **Permission-guarded cache** — cached answers are reused only if their source categories are a subset of the asking user's role. A privileged answer is never served to a lower role.
+- **Deterministic routing** — explicit category validated against role first; otherwise keyword hits pick collections; ambiguity falls back to all allowed categories.
+- **Fail-closed dependencies** — Redis down ⇒ login/query return 503 rather than running unthrottled.
+- **Retry, not circuit breaker** — two retries on flaky LLM calls; a real breaker matters at traffic this tool doesn't see.
+
+## Quickstart
 
 ```bash
-python -m venv .venv && source .venv/bin/activate
+python -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -e .
-cp .env.example .env      # add your GROQ_API_KEY (console.groq.com/keys) and a JWT_SECRET_KEY
-python scripts/ingest.py  # builds Qdrant collections once
-```
-
-Start the backend and its infrastructure separately:
-
-```bash
-  docker compose up --build          # starts PostgreSQL + Qdrant + Redis + FastAPI
-```
-
-In a second terminal, start the separate Streamlit frontend directly:
-
-```bash
+cp .env.example .env        # add GROQ_API_KEY + JWT_SECRET_KEY (openssl rand -hex 32)
+python scripts/ingest.py    # builds the 9 Qdrant collections once
+docker compose up -d redis  # rate limiting + caching backend
+uvicorn hr_rag.api.main:app --port 8000
 streamlit run frontend/app.py
 ```
 
-The frontend opens at `http://localhost:8501` and calls the backend at `http://localhost:8000`. Set `API_URL` when the backend is hosted elsewhere.
+Or everything containerized: `docker compose up --build` (PostgreSQL + Qdrant + Redis + FastAPI), then Streamlit separately.
 
-or locally, with Redis running separately:
+## API
 
-```bash
-uvicorn hr_rag.api.main:app --reload --port 8000
-```
-
-Docs at `http://localhost:8000/docs`.
-
-For the notebook (uses 10 questions by default to stay within free-tier limits):
-
-```bash
-pip install -e ".[dev]"
-jupyter notebook notebooks/experiments.ipynb
-```
-
-Tests:
-
-```bash
-pytest tests/ -v
-```
-
-## Trying the API
-
-Three demo users are seeded into PostgreSQL on first startup:
-
-- `employee1` / `employee123` -- sees leave, conduct, recruitment
-- `manager1` / `manager123` -- + performance
-- `hradmin1` / `hradmin123` -- all categories
+| Method | Path | Auth | Notes |
+|---|---|---|---|
+| POST | `/auth/signup` | — | always creates `employee`; elevated roles via provision |
+| POST | `/auth/login` | — | 5 attempts/min/user; issues access (30 min) + single-use refresh (7 days) |
+| POST | `/auth/refresh` | refresh token | rotation: old token consumed, replay → 401 |
+| POST | `/auth/provision` | `hr_admin` | create users with any role |
+| POST | `/query` | any user | `{question, category?}` → answer + cited sources |
+| GET | `/health` | — | Redis connectivity + pipeline status |
 
 ```bash
 curl -X POST localhost:8000/auth/login -H "Content-Type: application/json" \
@@ -101,8 +70,37 @@ curl -X POST localhost:8000/query -H "Authorization: Bearer <token>" \
   -d '{"question": "How many days of casual leave do I get?"}'
 ```
 
-Ask the same question again and `cached` flips to `true`, latency drops to a few ms. Ask a compensation question as `employee1` and it'll say it doesn't have access -- log in as `hradmin1` and it answers.
+Seeded demo users: `employee1/employee123`, `manager1/manager123`, `hradmin1/hradmin123`.
 
-## What's not in here yet
+## Security model
 
-Circuit breaker + LLM provider fallback, a proper CI eval gate, external identity provider, production secret manager, and full observability dashboards. These are the next steps for a larger deployment; the current project is production-style for portfolio use.
+- bcrypt password hashing; JWTs carry `sub/type/jti`, signature verified on every call
+- Refresh tokens are **single-use and stored hashed** — a stolen token can't be replayed after rotation
+- Roles map to category allow-lists (`rbac.py`); compensation stays manager+ / hr_admin only
+- Placeholder `JWT_SECRET_KEY` refuses to boot
+- CORS restricted to known frontend origins
+
+## Evaluation
+
+A curated [`data/eval/qa_dataset.py`](data/eval/qa_dataset.py) set — **43 questions** tagged by category, difficulty (`easy/medium/hard`) and type (`numeric/factual/multi_hop/paraphrase/unanswerable`), with ground-truth answers checked against the source documents. [`notebooks/experiments.ipynb`](notebooks/experiments.ipynb) compares baseline, hybrid, query-rewrite, multi-query, compression, metadata-filter, HyDE and cross-encoder retrieval with RAGAS (faithfulness, context precision/recall). Winning setup shipped in this repo: **hybrid BM25+dense over per-category Qdrant collections**.
+
+## Observability
+
+Every prompt/LLM run is traced to **LangSmith** (project `HR-RAG-Experiments`: inputs, outputs, token usage, latency); MLflow tracks the offline experiments.
+
+## Testing & layout
+
+54 unit tests cover auth/RBAC, category routing, chunking and dataset integrity — fully self-contained (SQLite + no API keys needed). CI runs ruff + pytest on every push/PR.
+
+```
+data/policies, data/eval   corpus + eval set
+src/hr_rag                 RAG library (load/chunk/embed/route/retrieve/pipeline)
+src/hr_rag/api             FastAPI service (auth, rbac, cache, rate limit, routes)
+frontend/app.py            Streamlit client
+scripts/ingest.py          builds Qdrant collections offline
+tests/, docker/, docs      suite, compose stack, notebook dump util
+```
+
+## Known gaps
+
+No LLM provider fallback/circuit breaker, no Alembic migrations, no load-test numbers, single-tenant auth (no external IdP). Tracked in mind for the next iteration.
