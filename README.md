@@ -12,6 +12,25 @@ Grounded Q&A over **TechCorp's internal policy corpus** — 9 policy documents a
 "What is the bonus formula for L4?" as employee  → access denied (RBAC, enforced at retrieval)
 ```
 
+## The problem it solves
+
+In any mid-size company the same policy questions land on HR every single week — *casual leave balance, expense limits, probation rules, bonus eligibility*. The answers exist, but they are scattered across nine documents owned by five different departments, and some of them (salary bands, bonus formulas) are sensitive. Generic chatbots make all of this worse: they hallucinate numbers, ignore access rules, and bill you tokens for every repeat.
+
+| Real pain | What this repo does about it |
+|---|---|
+| HR keeps answering the same ~20 questions | Self-serve assistant; identical questions served from cache in milliseconds, zero LLM cost |
+| One answer is split across departments — *"referral bonus timing"* lives in Recruitment **and** Compensation | Keyword router selects the right collections; multi-hop questions pool across all allowed ones |
+| LLMs confidently invent numbers (18 casual leaves vs the real 12) | Grounded generation — answers come only from retrieved chunks, and every response cites doc IDs + snippets so employees can verify |
+| Sensitive policies must not leak (salary bands, bonus formulas) | RBAC is enforced **inside retrieval**: an employee's request never touches compensation vectors — a forgotten route check can't leak anything |
+| Real users type paraphrases/Hinglish that break keyword search | Hybrid BM25 + dense retrieval handles *"mera baby hone wala hai, third child, kitni maternity leave milegi?"* → 12 weeks |
+| Uncontrolled usage silently burns API budget | Per-user sliding-window rate limits; if Redis is down the service fails closed instead of running unthrottled |
+
+**A representative exchange** (from the eval set):
+
+> **Q:** *mera baby hone wala hai, third child, kitni maternity leave milegi?*
+> **A:** For the third child onwards, maternity leave entitlement is 12 weeks — reduced from the 26 weeks given for the first two children.
+> **Sources:** `HRP-001 · Leave Policy` — *"…third child onwards…12 weeks…"*
+
 ## How it works
 
 ```mermaid
@@ -81,6 +100,20 @@ Seeded demo users: `employee1/employee123`, `manager1/manager123`, `hradmin1/hra
 - CORS restricted to known frontend origins
 
 ## Evaluation
+
+**The corpus** — 9 policy documents, each carrying a `policy_doc_id`, version and effective date that flow through chunking into every cited source:
+
+| Category | Doc ID | Covers |
+|---|---|---|
+| Leave | `HRP-001` | casual / sick / earned / maternity / paternity leave, probation rules |
+| Compensation & Payroll | `HRP-002` | salary structure, PF & gratuity, bonus, insurance |
+| Code of Conduct | `HRP-003` | harassment, grievance, disciplinary process |
+| Performance Management | `HRP-004` | PIP, ratings, promotion, increments |
+| Recruitment & Onboarding | `HRP-005` | referrals, background verification, IJP |
+| Finance & Expense | `FIN-001` | reimbursements, travel, procurement, invoicing |
+| IT Security | `IT-001` | passwords/MFA, phishing, devices, VPN |
+| Legal & Compliance | `LEG-001` | contracts, vendors, privacy, regulatory |
+| Operations & Workplace | `OPS-001` | badge/access, visitors, business continuity |
 
 A curated [`data/eval/qa_dataset.py`](data/eval/qa_dataset.py) set — **43 questions** tagged by category, difficulty (`easy/medium/hard`) and type (`numeric/factual/multi_hop/paraphrase/unanswerable`), with ground-truth answers checked against the source documents. [`notebooks/experiments.ipynb`](notebooks/experiments.ipynb) compares baseline, hybrid, query-rewrite, multi-query, compression, metadata-filter, HyDE and cross-encoder retrieval with RAGAS (faithfulness, context precision/recall). Winning setup shipped in this repo: **hybrid BM25+dense over per-category Qdrant collections**.
 
