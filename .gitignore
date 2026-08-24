@@ -1,0 +1,22 @@
+mlruns/
+.venv/
+.venv-1/
+.venv-2/
+venv/
+__pycache__/
+*.pyc
+*.db
+/.env
+.env
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+data/vectorstore/
+# local Qdrant on-disk storage (binary collection files, not source)
+data/qdrant/
+.ipynb_checkpoints/
+.DS_Store
+
+# scratch dump + stray local qdrant storage created by a notebook run
+notebooks/_dump.txt
+notebooks/data/

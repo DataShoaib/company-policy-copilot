@@ -1,0 +1,72 @@
+[project]
+name = "hr-policy-copilot"
+version = "0.2.0"
+description = "Production RAG system for HR policy Q&A — retrieval experiments + JWT-secured, rate-limited, cached FastAPI service."
+requires-python = ">=3.10,<3.14"
+
+dependencies = [
+    # LangChain (bridge versions — pinned together deliberately, these
+    # three packages break at minor-version mismatches)
+    "langchain==0.3.10",
+    "langchain-core==0.3.25",
+    "langchain-community==0.3.10",
+    "langchain-huggingface>=0.1.0",
+    # LLM providers
+    "langchain-google-genai==2.0.0",
+    "langchain-groq>=0.2.1",
+    # vector store
+    "qdrant-client>=1.12.0",
+    # embeddings
+    "sentence-transformers>=3.0.0",
+    # BM25 (hybrid retrieval)
+    "rank-bm25>=0.2.2",
+    # evaluation
+    "ragas==0.1.10",
+    "datasets>=2.20.0",
+    "nest-asyncio>=1.6.0",
+    # tracking
+    "mlflow>=2.14.0",
+    "langsmith>=0.1.0",
+    "dagshub>=0.3.35",
+    # utils
+    "python-dotenv>=1.0.0",
+    "pandas>=2.0.0",
+    "notebook>=7.0.0",
+
+    # ---- production API (added for the FastAPI service) ----
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.32.0",
+    "pydantic>=2.9.0",
+    "pydantic-settings>=2.5.0",
+    "python-jose[cryptography]>=3.3.0",   # JWT encode/decode
+    "passlib[bcrypt]>=1.7.4",             # password hashing
+    "bcrypt<4.0.0",                       # passlib 1.7.4 is incompatible with bcrypt>=4.0 (breaks .hash());
+                                           # pinned explicitly rather than leaving it to luck of resolution order
+    "redis>=5.0.0",                       # caching + rate limiting backend
+    "slowapi>=0.1.9",                     # rate-limiting middleware for FastAPI
+    "python-multipart>=0.0.9",            # form/login support in FastAPI
+    "sqlalchemy>=2.0.0",                  # relational user store
+    "psycopg[binary]>=3.2.0",              # PostgreSQL driver
+    "streamlit>=1.40.0,<1.50.0",            # compatible with protobuf 4 and Google clients
+    "requests>=2.32.0",                    # Streamlit API client
+    "protobuf>=4.25.0,<5.0.0",              # compatible with Google/Groq clients
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.24.0",
+    "httpx>=0.27.0",
+    "ruff>=0.6.0",
+]
+
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
