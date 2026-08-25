@@ -17,6 +17,8 @@ class RateLimitServiceUnavailable(Exception):
 
 
 def check_rate_limit(user_id: str, limit_per_minute: int | None = None, namespace: str = "query") -> None:
+    if not settings.rate_limit_enabled:
+        return
     limit = limit_per_minute or settings.rate_limit_per_minute
     window = int(time.time() // 60)
     key = f"hrrag:rate:{namespace}:{user_id}:{window}"

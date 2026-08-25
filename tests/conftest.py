@@ -6,7 +6,14 @@ tests that only touch JWT or routing. It's now done here once per session so
 auth tests get the demo users they rely on, without spurious writes on import.
 """
 
-import pytest
+import os
+
+# The test-suite is self-contained and doesn't provision a Redis, so disable
+# the (fail-closed) rate limiter before pydantic-settings builds the Settings
+# object on the first hr_rag import.
+os.environ["RATE_LIMIT_ENABLED"] = "false"
+
+import pytest  # noqa: E402
 
 
 @pytest.fixture(scope="session", autouse=True)

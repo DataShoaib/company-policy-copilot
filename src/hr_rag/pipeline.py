@@ -5,7 +5,7 @@ from langchain_core.output_parsers import StrOutputParser
 
 from hr_rag.config import CATEGORIES, DEFAULT_TOP_K, RERANK_CANDIDATE_K
 from hr_rag.formatting import format_docs
-from hr_rag.llm import get_llm
+from hr_rag.llm import build_answer_llm
 from hr_rag.prompts import RAG_ANSWER_PROMPT
 from hr_rag.qdrant_store import QdrantCategoryStore
 from hr_rag.retrievers.router import route_question
@@ -27,8 +27,10 @@ class HRPolicyRAGPipeline:
         self.candidate_k = candidate_k
         self.collections = category_stores
 
-        self._llm = get_llm()
-        self._answer_chain = RAG_ANSWER_PROMPT | self._llm | StrOutputParser()
+        # Primary LLM with automatic fallback to the other provider (Groq ->
+        # Gemini) plus retries at the service layer. Tracing the whole chain
+        # means LangSmith captures the fallback hop too.
+        self._answer_chain = RAG_ANSWER_PROMPT | build_answer_llm() | StrOutputParser()
 
     def retrieve(self, question: str, category: str | None = None, allowed_categories: list[str] | None = None, metadata_filter: dict | None = None) -> list[Document]:
         if category:

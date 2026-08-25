@@ -22,6 +22,9 @@ class Settings(BaseSettings):
 
     rate_limit_per_minute: int = 20
     login_rate_limit_per_minute: int = 5
+    # Kill switch for rate limiting. Defaults to ON (fail-closed). Set to false
+    # for local load-testing / unit tests that don't provision a Redis.
+    rate_limit_enabled: bool = True
 
     # The Streamlit client runs on 8501. Credentials-enabled CORS must use an
     # explicit origin allowlist -- ["*"] + allow_credentials is not allowed.

@@ -29,6 +29,7 @@ from hr_rag.api.services.rate_limit import (
     RateLimitExceeded,
     RateLimitServiceUnavailable,
     check_login_rate_limit,
+    check_rate_limit,
 )
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -52,6 +53,19 @@ def _issue_tokens(user: dict) -> TokenResponse:
 
 @router.post("/signup", response_model=TokenResponse)
 def signup(body: SignupRequest):
+    try:
+        check_rate_limit(body.username.strip().lower(), settings.login_rate_limit_per_minute, namespace="signup")
+    except RateLimitExceeded as exc:
+        AUTH_TOTAL.labels(kind="signup", outcome="rate_limited").inc()
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=f"Too many signup attempts. Try again in {exc.retry_after_seconds} seconds.",
+            headers={"Retry-After": str(exc.retry_after_seconds)},
+        ) from exc
+    except RateLimitServiceUnavailable as exc:
+        AUTH_TOTAL.labels(kind="signup", outcome="service_unavailable").inc()
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Signup service is temporarily unavailable. Please try again later.") from exc
+
     try:
         user = register_user(body.username, body.password, body.full_name, "employee")
     except ValueError as exc:
@@ -102,6 +116,19 @@ def refresh(body: RefreshRequest):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired refresh token")
 
     username = payload.get("sub")
+    # Throttle refresh attempts too — an attacker brute-forcing refresh tokens
+    # or replaying a stolen one should not get unbounded guesses.
+    try:
+        check_rate_limit(username, settings.login_rate_limit_per_minute, namespace="refresh")
+    except RateLimitExceeded as exc:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=f"Too many refresh attempts. Try again in {exc.retry_after_seconds} seconds.",
+            headers={"Retry-After": str(exc.retry_after_seconds)},
+        ) from exc
+    except RateLimitServiceUnavailable as exc:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Refresh service is temporarily unavailable. Please try again later.") from exc
+
     # Single-use rotation: if this token has already been used, or was revoked,
     # reject it. This is what stops a stolen refresh token from being replayed.
     if not consume_refresh_token(body.refresh_token, username):
