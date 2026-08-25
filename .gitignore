@@ -20,3 +20,7 @@ data/qdrant/
 # scratch dump + stray local qdrant storage created by a notebook run
 notebooks/_dump.txt
 notebooks/data/
+
+# local server logs — never commit process output
+*.log
+*.pid
