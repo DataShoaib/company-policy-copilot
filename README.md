@@ -76,6 +76,8 @@ streamlit run frontend/app.py
 
 Or everything containerized: `docker compose up --build` (PostgreSQL + Qdrant + Redis + FastAPI), then Streamlit separately.
 
+**Windows one-click:** `run-hr.bat` starts the API on `:8001` and the UI on `:8502` (off the default ports, so it coexists with other projects on 8000/8501) under `API_URL=http://localhost:8001`. Requires Redis + Qdrant running (`docker compose up -d redis qdrant`).
+
 ## API
 
 | Method | Path | Auth | Notes |
@@ -114,19 +116,39 @@ An evaluation set ([`data/eval/qa_dataset.py`](data/eval/qa_dataset.py)) keeps t
 
 Every prompt/LLM run is traced to **LangSmith** (project `HR-RAG-Experiments`: inputs, outputs, token usage, latency); MLflow tracks the offline experiments.
 
+Structured **JSON logging** (one parseable line per event, correlated by a per-request `request_id`) and a Prometheus **`/metrics`** endpoint expose the signals that matter for ops: query volume + end-to-end latency histogram, **cache hit-ratio gauge**, auth outcomes, RBAC denials, and LLM calls/fallbacks. Point a Prometheus scraper at `/metrics` and alert on latency / hit-ratio / 5xx.
+
+## Reliability
+
+- **LLM failover**: answers run on the configured provider (Groq) and fail over transparently to the other (Gemini) via `with_fallbacks`, plus retries at the service layer — a provider outage no longer hard-fails `/query`.
+- **DB migrations**: schema is versioned with **Alembic** (wired to the runtime `DATABASE_URL`); fresh DBs get the full DDL via `alembic upgrade head`, existing ones are stamped.
+- **DB portability**: the ORM layer runs on SQLite locally and PostgreSQL in Docker by toggling `DATABASE_URL`; `psycopg` ships by default.
+- **Qdrant server mode**: `QDRANT_URL` points at the compose qdrant service (dashboard on `:6333/dashboard`); multi-process-safe, vs. the single-process embedded mode when unset.
+
 ## Testing & layout
 
-54 unit tests cover auth/RBAC, category routing, chunking and dataset integrity — fully self-contained (SQLite + no API keys needed). CI runs ruff + pytest on every push/PR.
+**61 tests** — self-contained: `54` unit (auth/RBAC, routing, chunking, dataset integrity) + **7 end-to-end integration** over the wired routers (signup → login → refresh rotation → single-use replay rejection → RBAC enforcement), all with SQLite + `RATE_LIMIT_ENABLED=false` (no Redis/keys needed). CI runs ruff + pytest on every push/PR.
 
-```
+```text
 data/policies, data/eval   corpus + eval set
 src/hr_rag                 RAG library (load/chunk/embed/route/retrieve/pipeline)
-src/hr_rag/api             FastAPI service (auth, rbac, cache, rate limit, routes)
+src/hr_rag/api             FastAPI service (auth, rbac, cache, rate limit, metrics, routes)
+alembic/                   versioned DB migrations
 frontend/app.py            Streamlit client
 scripts/ingest.py          builds Qdrant collections offline
-tests/, docker/, docs      suite, compose stack, notebook dump util
+scripts/locustfile.py      load test (see docs/load-test.md)
+tests/, docker/, docs      suite, compose stack, load-test + deploy notes
+render.yaml, run-hr.bat    deploy + one-click local launch
 ```
+
+## Load test
+
+[`docs/load-test.md`](docs/load-test.md): 515 `/query` requests, **0 failures**, **p50 = 13 ms, p95 = 31 ms**, ~8.8 req/s from 5 users — Redis cache hit ratio **1.0**, only fresh-LLM misses >1 s.
+
+## Deployment
+
+[`render.yaml`](render.yaml) + [`docs/deploy.md`](docs/deploy.md) lay out a managed stack (Postgres, Redis, Qdrant cluster, API on Render/Railway). `run-hr.bat` is a one-click local launcher that runs the API on `:8001` and UI on `:8502` (side-by-side with projects that own 8000/8501) under `API_URL`.
 
 ## Known gaps
 
-No LLM provider fallback/circuit breaker, no Alembic migrations, no load-test numbers, single-tenant auth (no external IdP). Tracked in mind for the next iteration.
+Single-tenant auth (no external IdP/SSO), no LLM **circuit breaker** (retry + failover exist, breaker is for higher-traffic prod), no full Alembic history yet (baseline + future migrations only), metrics without an attached Grafana/Prometheus stack. Tracked for the next iteration.

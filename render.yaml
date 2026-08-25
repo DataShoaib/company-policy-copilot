@@ -1,0 +1,29 @@
+# Render blueprint — infra as code for the Policy Copilot API.
+# Requires: dedicated Redis, a Qdrant cluster (or an external URL), and
+# Postgres (or leave DATABASE_URL defaulting to a SQLite data dir built
+# inside the image at build time — not recommended for prod instances).
+services:
+  - type: web
+    name: hr-policy-api
+    runtime: python
+    plan: free
+    buildCommand: "pip install -e ."
+    startCommand: "uvicorn hr_rag.api.main:app --host 0.0.0.0 --port $PORT"
+    healthCheckPath: /health
+    # Qdrant vectors + policy corpus live in the repo, so the image self-hosts
+    # only the embeddings model + code. Vector/DB edges point at managed URLs.
+    envVars:
+      - key: JWT_SECRET_KEY
+        generateValue: true
+      - key: GROQ_API_KEY
+        sync: false
+      - key: GOOGLE_API_KEY
+        sync: false
+      - key: LANGCHAIN_API_KEY
+        sync: false
+      - key: REDIS_URL
+        sync: false
+      - key: QDRANT_URL
+        sync: false
+      - key: DATABASE_URL
+        sync: false

@@ -13,7 +13,7 @@ import os
 # object on the first hr_rag import.
 os.environ["RATE_LIMIT_ENABLED"] = "false"
 
-import pytest  # noqa: E402
+import pytest
 
 
 @pytest.fixture(scope="session", autouse=True)
