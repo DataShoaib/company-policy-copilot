@@ -3,6 +3,7 @@ from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from hr_rag.api.core.deps import get_current_user
+from hr_rag.api.core.metrics import AUTH_TOTAL
 from hr_rag.api.core.security import (
     create_access_token,
     create_refresh_token,
@@ -54,7 +55,9 @@ def signup(body: SignupRequest):
     try:
         user = register_user(body.username, body.password, body.full_name, "employee")
     except ValueError as exc:
+        AUTH_TOTAL.labels(kind="signup", outcome="failure").inc()
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    AUTH_TOTAL.labels(kind="signup", outcome="success").inc()
     return _issue_tokens(user)
 
 
@@ -85,7 +88,9 @@ def login(body: LoginRequest):
 
     user = authenticate_user(body.username.strip(), body.password)
     if not user:
+        AUTH_TOTAL.labels(kind="login", outcome="failure").inc()
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Incorrect username or password")
+    AUTH_TOTAL.labels(kind="login", outcome="success").inc()
 
     return _issue_tokens(user)
 

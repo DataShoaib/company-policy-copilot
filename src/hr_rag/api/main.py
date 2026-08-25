@@ -5,6 +5,9 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from hr_rag.api.core.database import init_db
+from hr_rag.api.core.logging import configure_logging
+from hr_rag.api.core.metrics import metrics_response
+from hr_rag.api.core.middleware import RequestContextMiddleware
 from hr_rag.api.core.settings import settings
 from hr_rag.api.core.users import seed_demo_users
 from hr_rag.api.routes import auth, health, query
@@ -16,6 +19,8 @@ _JWT_PLACEHOLDER_PREFIXES = ("CHANGE_ME", "your_jwt", "replace_me")
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
+    # One call configures structured JSON logging for the whole process.
+    configure_logging()
     # Security: refuse to boot on a placeholder JWT secret. Otherwise an
     # attacker can forge valid access tokens signed with the well-known default.
     if settings.jwt_secret_key.startswith(_JWT_PLACEHOLDER_PREFIXES):
@@ -59,10 +64,19 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+# Request-ID + HTTP metrics. Order matters: this runs outside the routers so
+# it wraps everything, and outside rate limiting / CORS is fine.
+app.add_middleware(RequestContextMiddleware)
 
 app.include_router(health.router)
 app.include_router(auth.router)
 app.include_router(query.router)
+
+
+@app.get("/metrics")
+def metrics():
+    """Prometheus scrape endpoint (text format)."""
+    return metrics_response()
 
 
 @app.get("/")

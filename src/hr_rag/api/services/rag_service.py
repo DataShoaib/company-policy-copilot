@@ -1,5 +1,12 @@
 import time
 
+from hr_rag.api.core.metrics import (
+    CACHE_HIT_RATIO,
+    CACHE_LOOKUPS,
+    QUERY_LATENCY,
+    QUERY_REQUESTS,
+    RBAC_DENIALS,
+)
 from hr_rag.api.core.rbac import allowed_categories_for_role
 from hr_rag.api.services.cache import (
     cached_answer_is_allowed,
@@ -11,6 +18,21 @@ from hr_rag.retrievers.router import route_question
 
 MAX_RETRIES = 2
 RETRY_BACKOFF_SECONDS = 1.5
+
+# small in-proc window so we can publish a cache hit-ratio gauge without a
+# separate aggregator. Counters(Counter) keep cumulative totals; this ratio is
+# just the last N lookups, which is what an ops dashboard cares about.
+_RATIO_WINDOW: list[bool] = []
+_RATIO_WINDOW_SIZE = 100
+
+
+def _record_lookup(hit: bool) -> None:
+    CACHE_LOOKUPS.labels(hit="hit" if hit else "miss").inc()
+    _RATIO_WINDOW.append(hit)
+    if len(_RATIO_WINDOW) > _RATIO_WINDOW_SIZE:
+        del _RATIO_WINDOW[:- _RATIO_WINDOW_SIZE]
+    if _RATIO_WINDOW:
+        CACHE_HIT_RATIO.set(sum(_RATIO_WINDOW) / len(_RATIO_WINDOW))
 
 
 def _answer_with_retry(question: str, category: str | None, allowed_categories: list[str]):
@@ -34,11 +56,21 @@ def answer_question(question: str, role: str, category: str | None = None) -> tu
     allowed_categories = allowed_categories_for_role(role)
     cached = get_cached_answer(question, category)
     if cached is not None and cached_answer_is_allowed(cached, allowed_categories, category):
+        QUERY_REQUESTS.labels(outcome="cached").inc()
+        _record_lookup(hit=True)
+        QUERY_LATENCY.observe(time.time() - start)
         return cached["answer"], cached["sources"], True, int((time.time() - start) * 1000)
+    _record_lookup(hit=False)
 
     routed_categories = route_question(question, allowed_categories, category)
     if not routed_categories:
+        # RBAC refused the scope — count it so a mis-configuration shows as a
+        # denial spike rather than silently returning the same canned message.
+        RBAC_DENIALS.inc()
+        QUERY_REQUESTS.labels(outcome="denied").inc()
+        QUERY_LATENCY.observe(time.time() - start)
         return "I don't have access to that policy category for your role. Please check with HR directly.", [], False, int((time.time() - start) * 1000)
+
     answer, docs = _answer_with_retry(question, routed_categories[0] if len(routed_categories) == 1 else None, routed_categories)
 
     sources = [
@@ -55,4 +87,7 @@ def answer_question(question: str, role: str, category: str | None = None) -> tu
     # and a user with broader access asking the same question deserves a real lookup
     if sources:
         set_cached_answer(question, answer, sources, category)
+
+    QUERY_REQUESTS.labels(outcome="answered").inc()
+    QUERY_LATENCY.observe(time.time() - start)
     return answer, sources, False, int((time.time() - start) * 1000)
