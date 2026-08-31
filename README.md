@@ -120,9 +120,8 @@ Structured **JSON logging** (one parseable line per event, correlated by a per-r
 
 ## Reliability
 
-- **LLM failover**: answers run on the configured provider (Groq) and fail over transparently to the other (Gemini) via `with_fallbacks`, plus retries at the service layer — a provider outage no longer hard-fails `/query`.
-- **DB migrations**: schema is versioned with **Alembic** (wired to the runtime `DATABASE_URL`); fresh DBs get the full DDL via `alembic upgrade head`, existing ones are stamped.
-- **DB portability**: the ORM layer runs on SQLite locally and PostgreSQL in Docker by toggling `DATABASE_URL`; `psycopg` ships by default.
+- **LLM failover**: all providers go through **LiteLLM** — answers run on the configured provider and fail over transparently to the other via `with_fallbacks`, with built-in retries — a provider outage no longer hard-fails `/query`.
+- **DB setup**: the ORM layer runs on SQLite locally and PostgreSQL in Docker by toggling `DATABASE_URL`; tables are created automatically at startup (`init_db`), `psycopg` ships by default.
 - **Qdrant server mode**: `QDRANT_URL` points at the compose qdrant service (dashboard on `:6333/dashboard`); multi-process-safe, vs. the single-process embedded mode when unset.
 
 ## Testing & layout
@@ -132,18 +131,12 @@ Structured **JSON logging** (one parseable line per event, correlated by a per-r
 ```text
 data/policies, data/eval   corpus + eval set
 src/hr_rag                 RAG library (load/chunk/embed/route/retrieve/pipeline)
-src/hr_rag/api             FastAPI service (auth, rbac, cache, rate limit, metrics, routes)
-alembic/                   versioned DB migrations
+src/hr_rag/api             FastAPI service (auth, rbac, cache, rate limit, guardrails, metrics, routes)
 frontend/app.py            Streamlit client
 scripts/ingest.py          builds Qdrant collections offline
-scripts/locustfile.py      load test (see docs/load-test.md)
-tests/, docker/, docs      suite, compose stack, load-test + deploy notes
+tests/, docker/, docs      suite, compose stack, deploy notes
 render.yaml, run-hr.bat    deploy + one-click local launch
 ```
-
-## Load test
-
-[`docs/load-test.md`](docs/load-test.md): 515 `/query` requests, **0 failures**, **p50 = 13 ms, p95 = 31 ms**, ~8.8 req/s from 5 users — Redis cache hit ratio **1.0**, only fresh-LLM misses >1 s.
 
 ## Deployment
 
@@ -151,4 +144,4 @@ render.yaml, run-hr.bat    deploy + one-click local launch
 
 ## Known gaps
 
-Single-tenant auth (no external IdP/SSO), no LLM **circuit breaker** (retry + failover exist, breaker is for higher-traffic prod), no full Alembic history yet (baseline + future migrations only), metrics without an attached Grafana/Prometheus stack. Tracked for the next iteration.
+Single-tenant auth (no external IdP/SSO), no LLM **circuit breaker** (retry + failover exist, breaker is for higher-traffic prod), metrics without an attached Grafana/Prometheus stack. Tracked for the next iteration.

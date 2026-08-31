@@ -19,6 +19,7 @@ TechCorp follows a structured, fair, and inclusive hiring process. We hire for b
    - L6+ roles: CEO → Board (if above budget) → HR
 3. **SLA for approval:** 5 business days
 4. **Budget verification:** All positions must be in approved annual headcount plan
+5. **Requisition number format:** MRF submissions are assigned an auto-generated requisition number in the format REQ-<LEVEL>-<DEPT>-YYYY (e.g., REQ-L4-ENG-2026); this number must be quoted in all follow-up correspondence
 
 ---
 

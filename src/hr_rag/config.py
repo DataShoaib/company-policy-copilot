@@ -17,10 +17,12 @@ EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
 
 LLM_PROVIDER = os.getenv("LLM_PROVIDER", "groq").lower()
 GROQ_MODEL = os.getenv("GROQ_MODEL", "openai/gpt-oss-20b")
-GOOGLE_MODEL = os.getenv("GOOGLE_MODEL", "gemini-3.6-flash")
+# gemini-2.0-flash is the most widely available free-quota model (Gemini 2.5 is
+# also fine if your region/key allows it); gemini-3.6-flash is not a real model name.
+GOOGLE_MODEL = os.getenv("GOOGLE_MODEL", "gemini-2.0-flash")
 LLM_TEMPERATURE = 0
 
-DEFAULT_TOP_K = 3
+DEFAULT_TOP_K = 5
 RERANK_CANDIDATE_K = 10  # candidate pool per category before merging down to DEFAULT_TOP_K
 
 CATEGORIES = [

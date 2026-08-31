@@ -7,6 +7,8 @@ from hr_rag.api.core.metrics import (
     QUERY_REQUESTS,
     RBAC_DENIALS,
 )
+from hr_rag.api.services.guardrails import check_input_guardrails, check_output_guardrails
+
 from hr_rag.api.core.rbac import allowed_categories_for_role
 from hr_rag.api.services.cache import (
     cached_answer_is_allowed,
@@ -54,6 +56,15 @@ def answer_question(question: str, role: str, category: str | None = None) -> tu
     start = time.time()
 
     allowed_categories = allowed_categories_for_role(role)
+
+    # ----- INPUT GUARDRAILS (before any LLM/retrieval cost) -----
+    blocked = check_input_guardrails(question)
+    if blocked:
+        QUERY_REQUESTS.labels(outcome="input_blocked").inc()
+        _record_lookup(hit=False)
+        QUERY_LATENCY.observe(time.time() - start)
+        return blocked["detail"], [], False, int((time.time() - start) * 1000)
+
     cached = get_cached_answer(question, category)
     if cached is not None and cached_answer_is_allowed(cached, allowed_categories, category):
         QUERY_REQUESTS.labels(outcome="cached").inc()
@@ -82,6 +93,16 @@ def answer_question(question: str, role: str, category: str | None = None) -> tu
         }
         for d in docs
     ]
+
+    # ----- OUTPUT GUARDRAILS (before the answer reaches the user) -----
+    context_chunks = [d.page_content for d in docs]
+    output_blocked = check_output_guardrails(answer, context_chunks)
+    if output_blocked:
+        QUERY_REQUESTS.labels(outcome="output_blocked").inc()
+        _record_lookup(hit=False)
+        QUERY_LATENCY.observe(time.time() - start)
+        # do NOT cache blocked output — force a re-evaluation next time
+        return output_blocked["detail"], [], False, int((time.time() - start) * 1000)
 
     # don't cache empty-source fallbacks: they're role/scope-specific dead ends,
     # and a user with broader access asking the same question deserves a real lookup

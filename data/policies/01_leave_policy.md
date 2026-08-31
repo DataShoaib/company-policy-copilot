@@ -76,6 +76,7 @@ This Leave Management Policy outlines the types of leaves available to all full-
 - **Accrual:** 1 day Comp-Off for each day worked
 - **Validity:** Must be utilized within 60 days of earning
 - **Maximum accumulation:** 5 days at any given time
+- **Claim code:** Comp-Off must be claimed in the ESS portal using HRMS request type CO-WKD-1; the legacy paper form FRM-LV-CO has been deprecated
 
 ### 2.10 Work From Home (WFH) Leave
 - **Entitlement:** Up to 3 days per week for eligible roles (as per WFH eligibility matrix)

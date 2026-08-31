@@ -10,8 +10,13 @@ Tracked signals (the ones that actually matter for a RAG service):
 """
 from __future__ import annotations
 
-from prometheus_client import CONTENT_TYPE_LATEST, Counter, Gauge, Histogram
-from prometheus_client import generate_latest
+from prometheus_client import (
+    CONTENT_TYPE_LATEST,
+    Counter,
+    Gauge,
+    Histogram,
+    generate_latest,
+)
 from starlette.responses import Response
 
 # --- core RAG ------------------------------------------------------------

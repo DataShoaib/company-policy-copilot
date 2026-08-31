@@ -1,4 +1,4 @@
-"""43 curated HR policy Q&A pairs, checked against data/policies/*.md directly.
+"""53 curated HR policy Q&A pairs, checked against data/policies/*.md directly.
 Each item also carries category/question_type/difficulty so retrieval and
 generation quality can be scored per-slice, not just as one blended average."""
 
@@ -11,8 +11,8 @@ class QAItem:
     question: str
     ground_truth: str
     source_doc: str  # filename in data/policies/, "multiple" for multi-hop, "none" for unanswerable
-    category: str  # leave | compensation | conduct | performance | recruitment | cross-policy
-    question_type: str  # factual | numeric | multi_hop | paraphrase | unanswerable
+    category: str  # leave | compensation | conduct | performance | recruitment | finance | it | cross-policy
+    question_type: str  # factual | numeric | multi_hop | paraphrase | exact_keyword | unanswerable
     difficulty: str  # easy | medium | hard
     expected_keywords: list = field(default_factory=list)  # substrings a correctly-retrieved chunk must contain
 
@@ -355,6 +355,102 @@ QA_ITEMS = [
         question_type="multi_hop",
         difficulty="hard",
         expected_keywords=["L4", "HR Director", "₹50,000", "6 months", "BGV"],
+    ),
+
+    # ------------------------------------------------- EXACT-TERM / CODE LOOKUP
+    # These probe BM25's edge: rare lexical tokens (codes, IDs, form numbers)
+    # that dense embeddings cannot reliably disambiguate from generic prose.
+    # item 10 (HRP-001) uses a code that ALREADY existed in the corpus --
+    # the argument for BM25/hybrid predates any data augmentation.
+    QAItem(
+        id="exact-leave-01",
+        question="Which HRMS request type do I use to claim a compensatory off?",
+        ground_truth="Comp-Off must be claimed in the ESS portal using HRMS request type CO-WKD-1; the legacy paper form FRM-LV-CO has been deprecated.",
+        source_doc="01_leave_policy.md",
+        category="leave",
+        question_type="exact_keyword",
+        difficulty="easy",
+        expected_keywords=["CO-WKD-1", "FRM-LV-CO"],
+    ),
+    QAItem(
+        id="exact-comp-01",
+        question="What is the FBP plan code I need to select during flexible benefit plan enrollment?",
+        ground_truth="FBP-FLEX-2026 must be selected on the HRMS Benefits tab when enrolling in cafeteria components under the Flexible Benefit Plan.",
+        source_doc="02_compensation_payroll_policy.md",
+        category="compensation",
+        question_type="exact_keyword",
+        difficulty="easy",
+        expected_keywords=["FBP-FLEX-2026"],
+    ),
+    QAItem(
+        id="exact-comp-02",
+        question="What is the group mediclaim master policy number referenced on insurance claims?",
+        ground_truth="The Group Mediclaim master policy number is GRPMED-IN-4412, referenced on all insurance claims.",
+        source_doc="02_compensation_payroll_policy.md",
+        category="compensation",
+        question_type="exact_keyword",
+        difficulty="medium",
+        expected_keywords=["GRPMED-IN-4412"],
+    ),
+    QAItem(
+        id="exact-fin-01",
+        question="Which expense category code applies to a client dinner reimbursement?",
+        ground_truth="Client entertainment (business meals with external clients) must be tagged with expense category code EXP-ENT-05.",
+        source_doc="06_finance_expense_policy.md",
+        category="finance",
+        question_type="exact_keyword",
+        difficulty="medium",
+        expected_keywords=["EXP-ENT-05"],
+    ),
+    QAItem(
+        id="exact-fin-02",
+        question="I need my monthly broadband bill reimbursed — which expense category code do I tag it with?",
+        ground_truth="Telecom and internet bills are tagged with expense category code EXP-TEL-03.",
+        source_doc="06_finance_expense_policy.md",
+        category="finance",
+        question_type="exact_keyword",
+        difficulty="medium",
+        expected_keywords=["EXP-TEL-03"],
+    ),
+    QAItem(
+        id="exact-it-01",
+        question="What service request code do I use on the IT self-service portal to get approval for installing new software?",
+        ground_truth="New software requests are raised through the IT self-service portal using service request code IT-SW-117, reviewed by the IT Security team within 5 business days.",
+        source_doc="07_it_security_policy.md",
+        category="it",
+        question_type="exact_keyword",
+        difficulty="medium",
+        expected_keywords=["IT-SW-117"],
+    ),
+    QAItem(
+        id="exact-it-02",
+        question="Which VPN access group do contractors connect through?",
+        ground_truth="Contractors connect through the restricted VPN access group VPN-CNT-1, which does not grant access to source-code repositories.",
+        source_doc="07_it_security_policy.md",
+        category="it",
+        question_type="exact_keyword",
+        difficulty="hard",
+        expected_keywords=["VPN-CNT-1"],
+    ),
+    QAItem(
+        id="exact-rec-01",
+        question="What format does a manpower requisition number follow?",
+        ground_truth="Requisition numbers follow the format REQ-<LEVEL>-<DEPT>-YYYY (e.g., REQ-L4-ENG-2026) and must be quoted in all follow-up correspondence.",
+        source_doc="05_recruitment_onboarding_policy.md",
+        category="recruitment",
+        question_type="exact_keyword",
+        difficulty="medium",
+        expected_keywords=["REQ-", "-ENG-2026"],
+    ),
+    QAItem(
+        id="exact-docid-01",
+        question="Under which document ID is the Leave Management Policy filed?",
+        ground_truth="The Leave Management Policy carries Document ID HRP-001 (Version 2.1, effective January 1, 2024).",
+        source_doc="01_leave_policy.md",
+        category="leave",
+        question_type="exact_keyword",
+        difficulty="easy",
+        expected_keywords=["HRP-001"],
     ),
 
     # ----------------------------------------------------------- UNANSWERABLE

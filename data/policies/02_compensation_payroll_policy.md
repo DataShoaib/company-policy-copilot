@@ -64,6 +64,12 @@
 - Group Health Insurance top-up premium
 - Salary advance recovery
 
+### 2.4 Flexible Benefit Plan (FBP) Enrollment
+- Employees may restructure salary components under the Flexible Benefit Plan once per financial year
+- **Enrollment window:** First 30 days of April each year via HRMS > Benefits tab
+- **FBP plan code:** FBP-FLEX-2026 must be selected on the Benefits tab for cafeteria components
+- Group Mediclaim master policy number: GRPMED-IN-4412 (referenced on all insurance claims)
+
 ---
 
 ## 3. PROVIDENT FUND (PF)
