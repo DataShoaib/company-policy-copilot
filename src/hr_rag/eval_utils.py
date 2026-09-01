@@ -1,6 +1,7 @@
 import asyncio
 import contextlib
 import io
+import os
 import time
 from collections.abc import Callable
 
@@ -8,12 +9,13 @@ import mlflow
 import nest_asyncio
 from datasets import Dataset
 from langchain_core.documents import Document
+from langchain_openai import ChatOpenAI
 from ragas import evaluate
 from ragas.llms import LangchainLLMWrapper
 from ragas.metrics import context_precision, context_recall, faithfulness
 from ragas.run_config import RunConfig
 
-from hr_rag.config import LLM_PROVIDER, MLFLOW_EXPERIMENT_NAME, MLFLOW_TRACKING_URI
+from hr_rag.config import MLFLOW_EXPERIMENT_NAME, MLFLOW_TRACKING_URI
 from hr_rag.formatting import format_docs
 
 __all__ = ["evaluate_rag", "format_docs", "log_to_mlflow", "measure_latency"]
@@ -71,13 +73,25 @@ def evaluate_rag(chain, get_docs_fn: Callable[[str], list[Document]], dataset: d
     })
 
     from hr_rag.embeddings import get_embeddings
-    from hr_rag.llm import get_llm
 
-    # Judge = the configured primary provider (LLM_PROVIDER). LiteLLM's
-    # built-in retries absorb transient 429s; if the provider is truly down
-    # the run fails loudly instead of producing quietly-wrong numbers.
-    judge_llm = get_llm()
-    print(f"RAGAS judge LLM: {LLM_PROVIDER}")
+    # LLM-as-a-judge: NVIDIA Nemotron 3 Ultra through NVIDIA's OpenAI-
+    # compatible endpoint. Only the EVALUATOR changes here — the RAG answer
+    # chain, retriever, embeddings and dataset are untouched. max_retries
+    # gives exponential backoff on 429s from the free hosted endpoint.
+    if not os.environ.get("NVIDIA_API_KEY"):
+        raise RuntimeError(
+            "NVIDIA_API_KEY not set — add it to .env (Ragas judge needs it). "
+            "Get a free key at https://build.nvidia.com"
+        )
+    judge_llm = ChatOpenAI(
+        model="nvidia/nemotron-3-ultra-550b-a55b",
+        base_url="https://integrate.api.nvidia.com/v1",
+        api_key=os.environ["NVIDIA_API_KEY"],
+        temperature=0,
+        max_retries=5,   # exponential backoff on 429 / transient errors
+        timeout=120,
+    )
+    print("RAGAS judge LLM: nvidia/nemotron-3-ultra-550b-a55b (NVIDIA API)")
     ragas_llm = LangchainLLMWrapper(
         judge_llm, run_config=RunConfig(max_workers=1, timeout=EVAL_TIMEOUT_SECONDS),
     )

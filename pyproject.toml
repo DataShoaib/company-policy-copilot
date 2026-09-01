@@ -13,6 +13,7 @@ dependencies = [
     "langchain-huggingface>=0.1.0",
     # LLM gateway — every provider (Gemini/Groq) goes through LiteLLM
     "litellm>=1.60.0",
+    "langchain-openai>=0.2.0",             # Ragas judge LLM (NVIDIA OpenAI-compatible endpoint)
     # vector store
     "qdrant-client>=1.12.0",
     # embeddings
