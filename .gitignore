@@ -24,3 +24,4 @@ notebooks/data/
 # local server logs — never commit process output
 *.log
 *.pid
+*.err

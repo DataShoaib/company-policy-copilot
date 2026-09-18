@@ -1,6 +1,5 @@
-
-from langchain_community.vectorstores import FAISS
 from langchain_core.documents import Document
+from langchain_core.vectorstores import VectorStore
 from sentence_transformers import CrossEncoder
 
 from hr_rag.config import DEFAULT_TOP_K, RERANK_CANDIDATE_K
@@ -15,9 +14,9 @@ def _get_cross_encoder() -> CrossEncoder:
     return _cross_encoder
 
 
-def cross_encoder_retrieve(db: FAISS, question: str, candidate_k: int = RERANK_CANDIDATE_K, top_k: int = DEFAULT_TOP_K) -> list[Document]:
+def cross_encoder_retrieve(db: VectorStore, question: str, candidate_k: int = RERANK_CANDIDATE_K, top_k: int = DEFAULT_TOP_K) -> list[Document]:
     candidates = db.as_retriever(search_kwargs={"k": candidate_k}).invoke(question)
     pairs = [[question, d.page_content] for d in candidates]
     scores = _get_cross_encoder().predict(pairs)
-    ranked = sorted(zip(candidates, scores), key=lambda x: x[1], reverse=True)
+    ranked = sorted(zip(candidates, scores, strict=True), key=lambda x: x[1], reverse=True)
     return [doc for doc, _ in ranked[:top_k]]
