@@ -13,7 +13,7 @@ router = APIRouter(prefix="/query", tags=["query"])
 
 
 @router.post("", response_model=QueryResponse)
-def ask_policy_question(body: QueryRequest, user: dict = Depends(get_current_user)):  # noqa: B008
+def ask_policy_question(body: QueryRequest, user: dict = Depends(get_current_user)):  # noqa: B008  
     try:
         check_rate_limit(user_id=user["username"])
     except RateLimitExceeded as e:
@@ -21,7 +21,7 @@ def ask_policy_question(body: QueryRequest, user: dict = Depends(get_current_use
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail=f"Rate limit exceeded. Try again in {e.retry_after_seconds} seconds.",
             headers={"Retry-After": str(e.retry_after_seconds)},
-        )
+        ) from e
     except RateLimitServiceUnavailable as exc:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Query service is temporarily unavailable because rate limiting is offline. Start Redis and try again.") from exc
 

@@ -8,22 +8,18 @@ load_dotenv()
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 POLICIES_DIR = PROJECT_ROOT / "data" / "policies"
 EVAL_DIR = PROJECT_ROOT / "data" / "eval"
-VECTORSTORE_DIR = PROJECT_ROOT / "data" / "vectorstore"
 
 CHUNK_SIZE = 500
 CHUNK_OVERLAP = 50
 
 EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
 
-LLM_PROVIDER = os.getenv("LLM_PROVIDER", "groq").lower()
 GROQ_MODEL = os.getenv("GROQ_MODEL", "openai/gpt-oss-20b")
-# gemini-2.0-flash is the most widely available free-quota model (Gemini 2.5 is
-# also fine if your region/key allows it); gemini-3.6-flash is not a real model name.
-GOOGLE_MODEL = os.getenv("GOOGLE_MODEL", "gemini-2.0-flash")
+GOOGLE_MODEL = os.getenv("GOOGLE_MODEL", "gemini-3.5-flash-lite")
 LLM_TEMPERATURE = 0
 
-DEFAULT_TOP_K = 5
-RERANK_CANDIDATE_K = 10  # candidate pool per category before merging down to DEFAULT_TOP_K
+DEFAULT_TOP_K = 3
+RERANK_CANDIDATE_K = 10
 
 CATEGORIES = [
     "leave", "compensation", "conduct", "performance", "recruitment",
@@ -32,6 +28,7 @@ CATEGORIES = [
 
 MLFLOW_TRACKING_URI = os.getenv("MLFLOW_TRACKING_URI", "http://localhost:5000")
 MLFLOW_EXPERIMENT_NAME = "HR_RAG_Experiments"
+
 LANGCHAIN_PROJECT = "HR-RAG-Experiments"
 
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
