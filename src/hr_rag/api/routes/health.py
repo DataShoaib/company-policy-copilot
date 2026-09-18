@@ -12,7 +12,7 @@ def health():
     try:
         get_redis().ping()
         redis_ok = True
-    except Exception:  # noqa: BLE001 - Redis (or anything else) being down means degraded health
+    except Exception:  # noqa: BLE001 - health check must report degraded, not crash
         redis_ok = False
 
     return HealthResponse(

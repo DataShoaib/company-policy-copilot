@@ -1,5 +1,3 @@
-# who can see what. compensation has salary bands / bonus formulas, so it's
-# scoped to manager+ instead of every employee
 ROLE_ALLOWED_CATEGORIES = {
     "employee": ["leave", "conduct", "recruitment", "it", "operations"],
     "manager": ["leave", "conduct", "recruitment", "performance", "it", "operations"],
