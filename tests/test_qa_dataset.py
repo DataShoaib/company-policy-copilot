@@ -19,7 +19,8 @@ class TestDatasetStructure:
         assert len(ids) == len(set(ids))
 
     def test_all_question_types_are_valid(self):
-        valid = {"factual", "numeric", "multi_hop", "paraphrase", "unanswerable"}
+        valid = {"factual", "numeric", "multi_hop", "paraphrase",
+                 "exact_keyword", "unanswerable"}
         for item in QA_ITEMS:
             assert item.question_type in valid
 

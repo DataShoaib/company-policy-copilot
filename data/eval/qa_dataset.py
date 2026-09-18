@@ -2,7 +2,7 @@
 Each item also carries category/question_type/difficulty so retrieval and
 generation quality can be scored per-slice, not just as one blended average."""
 
-from dataclasses import dataclass, field, asdict
+from dataclasses import asdict, dataclass, field
 
 
 @dataclass
@@ -496,7 +496,7 @@ dataset = {
 qa_records = [asdict(item) for item in QA_ITEMS]
 
 
-def get_subset(question_type: str = None, category: str = None, difficulty: str = None):
+def get_subset(question_type: str | None = None, category: str | None = None, difficulty: str | None = None):
     items = QA_ITEMS
     if question_type:
         items = [i for i in items if i.question_type == question_type]

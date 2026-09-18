@@ -3,24 +3,14 @@
 Runs three retrievers over the SAME corpus and eval items -- no LLM, no API keys,
 purely retrieval scoring:
 
-  1. dense   : FAISS + all-MiniLM-L6-v2 (semantic similarity only)
+  1. dense   : Qdrant (in-memory) + all-MiniLM-L6-v2 (semantic similarity only)
   2. bm25    : sparse lexical scoring (exact-token matching)
   3. hybrid  : 50/50 EnsembleRetriever (same builder the app/notebook uses)
 
-Eval slices:
-  - exact_keyword : questions whose answers hinge on rare lexical tokens
-                    (codes/IDs/form numbers, e.g. "EXP-ENT-05", "HRP-001").
-                    Dense embeddings blur these into generic prose; BM25 nails them.
-  - paraphrase    : control slice -- semantically reworded questions. This is
-                    where dense holds its own, which is exactly WHY hybrid (not
-                    pure BM25) is the right choice.
-
-Metrics (per retriever):
-  - full_hit@k : fraction of items where ALL expected_keywords appear across top-k chunks
-  - mrr        : mean reciprocal rank of the first chunk containing ALL expected keywords
-
 Usage:  python scripts/eval_exact_term.py
 """
+
+# ruff: noqa: E402 -- the sys.path bootstrap below must run before the hr_rag imports
 import os
 import sys
 import warnings
@@ -31,17 +21,60 @@ warnings.filterwarnings("ignore")
 sys.path.insert(0, "src")
 sys.path.insert(0, "data/eval")
 
-from hr_rag.config import DEFAULT_TOP_K  # noqa: E402
-from hr_rag.data_loading import load_policy_documents  # noqa: E402
-from hr_rag.chunking import chunk_documents  # noqa: E402
-from hr_rag.embeddings import get_embeddings  # noqa: E402
-from hr_rag.retrievers.hybrid import build_hybrid_ensemble  # noqa: E402
-from qa_dataset import QA_ITEMS, get_subset  # noqa: E402
+from langchain_community.retrievers import BM25Retriever
+from langchain_core.documents import Document
+from qa_dataset import get_subset
+from qdrant_client import QdrantClient, models
 
-from langchain_community.vectorstores import FAISS  # noqa: E402
-from langchain_community.retrievers import BM25Retriever  # noqa: E402
+from hr_rag.chunking import chunk_documents
+from hr_rag.config import DEFAULT_TOP_K
+from hr_rag.data_loading import load_policy_documents
+from hr_rag.embeddings import get_embeddings
+from hr_rag.retrievers.hybrid import build_hybrid_ensemble
 
 TOP_K = DEFAULT_TOP_K
+
+
+class QdrantDenseRetriever:
+    def __init__(self, client: QdrantClient, collection: str, embeddings, k: int):
+        self.client = client
+        self.collection = collection
+        self.embeddings = embeddings
+        self.k = k
+
+    def invoke(self, question: str) -> list[Document]:
+        response = self.client.query_points(
+            collection_name=self.collection,
+            query=self.embeddings.embed_query(question),
+            limit=self.k,
+            with_payload=True,
+        )
+        return [
+            Document(page_content=point.payload["text"], metadata=point.payload.get("metadata", {}))
+            for point in response.points
+        ]
+
+    def as_retriever(self, search_kwargs: dict | None = None):
+        k = (search_kwargs or {}).get("k", self.k)
+        return QdrantDenseRetriever(self.client, self.collection, self.embeddings, k)
+
+
+def build_dense_store(chunks: list[Document], embeddings) -> QdrantDenseRetriever:
+    client = QdrantClient(":memory:")
+    client.create_collection(
+        collection_name="eval",
+        vectors_config=models.VectorParams(
+            size=len(embeddings.embed_query("dimension check")),
+            distance=models.Distance.COSINE,
+        ),
+    )
+    client.upload_collection(
+        collection_name="eval",
+        vectors=embeddings.embed_documents([chunk.page_content for chunk in chunks]),
+        payload=[{"text": chunk.page_content, "metadata": dict(chunk.metadata)} for chunk in chunks],
+        ids=list(range(len(chunks))),
+    )
+    return QdrantDenseRetriever(client, "eval", embeddings, TOP_K)
 
 
 def _norm(text: str) -> str:
@@ -97,7 +130,7 @@ def main():
     print(f"  {len(docs)} documents -> {len(chunks)} chunks\n")
 
     print("Building retrievers (dense | bm25 | hybrid) ...")
-    db = FAISS.from_documents(chunks, get_embeddings())
+    db = build_dense_store(chunks, get_embeddings())
     dense = db.as_retriever(search_kwargs={"k": TOP_K})
     bm25 = BM25Retriever.from_documents(chunks)
     bm25.k = TOP_K
