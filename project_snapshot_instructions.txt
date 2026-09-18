@@ -1,0 +1,49 @@
+hi. Here is everything from my notebook / old project, please save this in
+my inbox and keep it so I can restore later if needed. I kept a copy of
+the old/current setup because I want to be able to restore it.
+
+OLD FILES TO KEEP FOR RESTORE:
+
+1) backend + api
+- src/hr_rag/api/main.py (before LangSmith removal if I keep reverting)
+- src/hr_rag/api/core/logging.py
+- src/hr_rag/api/core/middleware.py
+- src/hr_rag/api/core/metrics.py
+- src/hr_rag/api/core/deps.py (before stateless changes)
+- src/hr_rag/api/routes/auth.py (before stateless JWT-only rework)
+- src/hr_rag/api/core/security.py
+- src/hr_rag/api/core/rbac.py
+- src/hr_rag/api/core/users.py
+- src/hr_rag/api/core/database.py
+- src/hr_rag/api/core/settings.py
+- src/hr_rag/api/schemas/schemas.py
+- src/hr_rag/api/services/rag_service.py
+- src/hr_rag/api/services/cache.py
+- src/hr_rag/api/services/rate_limit.py
+- src/hr_rag/api/services/guardrails.py
+- src/hr_rag/llm.py
+- src/hr_rag/config.py
+- src/hr_rag/eval_utils.py
+
+2) rag core
+- src/hr_rag/pipeline.py
+- src/hr_rag/qdrant_store.py
+- src/hr_rag/vectorstore.py (faiss)
+- src/hr_rag/retrievers/baseline.py
+- src/hr_rag/retrievers/ranker.py/FlashRank retriever files (if any)
+- src/hr_rag/retrievers/hybrid.py / multi_query / compression / hyde / metadata_filter / cross_encoder / query_rewrite
+- src/hr_rag/embeddings.py
+- src/hr_rag/data_loading.py
+- src/hr_rag/chunking.py
+- src/hr_rag/formatting.py
+- src/hr_rag/prompts.py
+
+3) eval
+- notebooks/experiments.ipynb
+- data/eval/qa_dataset.py
+
+4) scripts
+- scripts/eval_exact_term.py
+- any other scripts
+
+Please save all of this so I can restore.
