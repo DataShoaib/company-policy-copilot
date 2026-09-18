@@ -6,7 +6,11 @@ from langchain_core.documents import Document
 
 from hr_rag.config import POLICIES_DIR
 
-# filename -> category, also used for RBAC filtering in the API layer
+_DOC_ID_RE = re.compile(r"Document ID:\s*([A-Z0-9\-]+)")
+_VERSION_RE = re.compile(r"Version:\s*([\d.]+)")
+_EFFECTIVE_RE = re.compile(r"Effective:\s*([A-Za-z0-9 ,]+?)(?:\r?\n|$|\|)")
+_TITLE_RE = re.compile(r"^#\s*(.+?)\r?$", re.MULTILINE)
+
 _CATEGORY_MAP = {
     "01_leave_policy": "leave",
     "02_compensation_payroll_policy": "compensation",
@@ -18,11 +22,6 @@ _CATEGORY_MAP = {
     "08_legal_compliance_policy": "legal",
     "09_operations_workplace_policy": "operations",
 }
-
-_DOC_ID_RE = re.compile(r"Document ID:\s*([A-Z0-9\-]+)")
-_VERSION_RE = re.compile(r"Version:\s*([\d.]+)")
-_EFFECTIVE_RE = re.compile(r"Effective:\s*([A-Za-z0-9 ,]+?)(?:\r?\n|$|\|)")
-_TITLE_RE = re.compile(r"^#\s*(.+?)\r?$", re.MULTILINE)
 
 
 def _enrich_metadata(doc: Document) -> Document:

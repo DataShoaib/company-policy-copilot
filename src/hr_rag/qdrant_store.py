@@ -79,6 +79,9 @@ class QdrantCategoryStore:
         self.name = name
         self.embeddings = embeddings
 
+    def count(self) -> int:
+        return self.client.count(self.name).count
+
     def invoke(self, question: str, limit: int = 3, metadata_filter: dict | None = None) -> list[Document]:
         query_filter = None
         if metadata_filter:

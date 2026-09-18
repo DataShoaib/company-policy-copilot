@@ -13,7 +13,7 @@ class RateLimitExceeded(Exception):
 
 
 class RateLimitServiceUnavailable(Exception):
-    """Redis is unavailable, so requests must not bypass rate limiting."""
+    pass
 
 
 def check_rate_limit(user_id: str, limit_per_minute: int | None = None, namespace: str = "query") -> None:
