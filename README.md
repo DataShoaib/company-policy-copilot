@@ -67,7 +67,7 @@ flowchart LR
 ```bash
 python -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -e .
-cp .env.example .env        # add GROQ_API_KEY + JWT_SECRET_KEY (openssl rand -hex 32)
+cp .env.example .env        # add GROQ_API_KEY, GOOGLE_API_KEY (fallback), JWT_SECRET_KEY
 python scripts/ingest.py    # builds the per-category Qdrant collections once
 docker compose up -d redis  # rate limiting + caching backend
 uvicorn hr_rag.api.main:app --port 8000
@@ -100,6 +100,25 @@ curl -X POST localhost:8000/query -H "Authorization: Bearer <token>" \
 
 Seeded demo users: `employee1/employee123`, `manager1/manager123`, `hradmin1/hradmin123`.
 
+## Roles & provisioning
+
+**Provisioning** = an HR admin creating an account for someone else *with the role already attached*. It is the only way an elevated role comes into existence:
+
+- **Self-service signup** (`POST /auth/signup`, or *Create account* in the sidebar) always yields **`employee`** — `role` isn't a field on the request at all, so nobody can self-assign privileges.
+- **`POST /auth/provision`** is `hr_admin`-only (401 without a token, 403 for any other role) and accepts `role` ∈ `employee` · `manager` · `finance_user` · `hr_admin`. It creates the account and returns a token pair *for the new user*; the admin UI deliberately discards those tokens, so provisioning never silently swaps the admin into the account they just created. The teammate signs in themselves with the temporary password.
+- **In the UI**: sign in as `hradmin1` and the sidebar grows a **👥 Provision a user** panel — username, full name, temporary password, role. No other role ever sees it, and the API would 403 them anyway. The role picker doubles as a permission preview (`N of 9 policy scopes`).
+
+Roles map to a fixed set of policy categories in [`rbac.py`](src/hr_rag/api/core/rbac.py), enforced at the retrieval layer, not just at the route:
+
+| Role | Searchable policy categories |
+|---|---|
+| `employee` | leave, conduct, recruitment, it, operations |
+| `manager` | the above + performance |
+| `finance_user` | the above + finance |
+| `hr_admin` | all nine, including compensation and legal |
+
+A request for an out-of-scope category is answered with the reply "not available for your role" and zero sources, rather than a 4xx.
+
 ## Security model
 
 - bcrypt password hashing; JWTs carry `sub/type/jti`, signature verified on every call
@@ -114,13 +133,13 @@ An evaluation set ([`data/eval/qa_dataset.py`](data/eval/qa_dataset.py)) keeps t
 
 ## Observability
 
-Every prompt/LLM run is traced to **LangSmith** (project `HR-RAG-Experiments`: inputs, outputs, token usage, latency); MLflow tracks the offline experiments.
+MLflow tracks the offline retrieval experiments.
 
-Structured **JSON logging** (one parseable line per event, correlated by a per-request `request_id`) and a Prometheus **`/metrics`** endpoint expose the signals that matter for ops: query volume + end-to-end latency histogram, **cache hit-ratio gauge**, auth outcomes, RBAC denials, and LLM calls/fallbacks. Point a Prometheus scraper at `/metrics` and alert on latency / hit-ratio / 5xx.
+Query volume, end-to-end latency, cache hits, auth outcomes, RBAC denials, and LLM calls/fallbacks are visible via the API responses and the Streamlit client (latency + cache badge per answer).
 
 ## Reliability
 
-- **LLM failover**: all providers go through **LiteLLM** — answers run on the configured provider and fail over transparently to the other via `with_fallbacks`, with built-in retries — a provider outage no longer hard-fails `/query`.
+- **LLM failover**: every LLM call goes through a **LiteLLM `Router`** ([`llm.py`](src/hr_rag/llm.py)) — Groq is primary, Gemini the fallback, and the router retries the failing provider 3× before switching over, so a provider outage no longer hard-fails `/query`. Model names come from `GROQ_MODEL` / `GOOGLE_MODEL`.
 - **DB setup**: the ORM layer runs on SQLite locally and PostgreSQL in Docker by toggling `DATABASE_URL`; tables are created automatically at startup (`init_db`), `psycopg` ships by default.
 - **Qdrant server mode**: `QDRANT_URL` points at the compose qdrant service (dashboard on `:6333/dashboard`); multi-process-safe, vs. the single-process embedded mode when unset.
 
@@ -131,7 +150,7 @@ Structured **JSON logging** (one parseable line per event, correlated by a per-r
 ```text
 data/policies, data/eval   corpus + eval set
 src/hr_rag                 RAG library (load/chunk/embed/route/retrieve/pipeline)
-src/hr_rag/api             FastAPI service (auth, rbac, cache, rate limit, guardrails, metrics, routes)
+src/hr_rag/api             FastAPI service (auth, rbac, cache, rate limit, guardrails, routes)
 frontend/app.py            Streamlit client
 scripts/ingest.py          builds Qdrant collections offline
 tests/, docker/, docs      suite, compose stack, deploy notes
@@ -144,4 +163,4 @@ render.yaml, run-hr.bat    deploy + one-click local launch
 
 ## Known gaps
 
-Single-tenant auth (no external IdP/SSO), no LLM **circuit breaker** (retry + failover exist, breaker is for higher-traffic prod), metrics without an attached Grafana/Prometheus stack. Tracked for the next iteration.
+Single-tenant auth (no external IdP/SSO), no LLM **circuit breaker** (retry + failover exist, breaker is for higher-traffic prod). Accounts can be created but not edited — there is no deprovisioning or role-change endpoint yet. Tracked for the next iteration.

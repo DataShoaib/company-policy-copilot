@@ -5,9 +5,6 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from hr_rag.api.core.database import init_db
-from hr_rag.api.core.logging import configure_logging
-from hr_rag.api.core.metrics import metrics_response
-from hr_rag.api.core.middleware import RequestContextMiddleware
 from hr_rag.api.core.settings import settings
 from hr_rag.api.core.users import seed_demo_users
 from hr_rag.api.routes import auth, health, query
@@ -19,18 +16,12 @@ _JWT_PLACEHOLDER_PREFIXES = ("CHANGE_ME", "your_jwt", "replace_me")
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
-    # One call configures structured JSON logging for the whole process.
-    configure_logging()
-    # Security: refuse to boot on a placeholder JWT secret. Otherwise an
-    # attacker can forge valid access tokens signed with the well-known default.
     if settings.jwt_secret_key.startswith(_JWT_PLACEHOLDER_PREFIXES):
         raise RuntimeError(
             "JWT_SECRET_KEY is still the placeholder default. Generate a real one "
             "with 'openssl rand -hex 32' and set it in .env before running."
         )
 
-    # DB tables + demo users are created here, not at import time, so importing
-    # the app for tests/tooling does not trigger writes as a side effect.
     init_db()
     seed_demo_users()
 
@@ -38,12 +29,9 @@ async def lifespan(_app: FastAPI):
     # during startup is traced too, not just request-time calls.
     enable_langsmith_tracing()
 
-    # Warm the embedding model + collections now, but don't let a missing or
-    # unconfigured LLM key take the whole API down -- /health can report
-    # pipeline_loaded=false ("degraded") instead.
     try:
         get_pipeline()
-    except Exception as exc:  # noqa: BLE001 - startup must not fail on provider config
+    except Exception as exc:  # noqa: BLE001 - startup must not crash on pipeline warmup failure
         print(f"[startup] WARNING: RAG pipeline failed to initialize: {exc}", file=sys.stderr)
 
     print(f"RAG model configured: {GROQ_MODEL}")
@@ -64,19 +52,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-# Request-ID + HTTP metrics. Order matters: this runs outside the routers so
-# it wraps everything, and outside rate limiting / CORS is fine.
-app.add_middleware(RequestContextMiddleware)
-
 app.include_router(health.router)
 app.include_router(auth.router)
 app.include_router(query.router)
-
-
-@app.get("/metrics")
-def metrics():
-    """Prometheus scrape endpoint (text format)."""
-    return metrics_response()
 
 
 @app.get("/")

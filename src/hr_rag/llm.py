@@ -1,77 +1,55 @@
-import os
+"""LLM gateway.
+
+One LiteLLM router owns everything provider related: it picks the model, retries
+the call, and falls back to the secondary provider when the primary keeps
+failing. Nothing else in the codebase needs to know which provider is in use.
+"""
+
 from functools import lru_cache
 
 from langchain_community.chat_models import ChatLiteLLM
 from langchain_core.language_models.chat_models import BaseChatModel
-from langchain_core.runnables import Runnable, RunnableLambda
+from litellm import Router
 
-from hr_rag.api.core.metrics import LLM_CALLS, LLM_FALLBACKS
 from hr_rag.config import (
     GOOGLE_API_KEY,
     GOOGLE_MODEL,
     GROQ_API_KEY,
     GROQ_MODEL,
-    LLM_PROVIDER,
     LLM_TEMPERATURE,
 )
 
-# LiteLLM reads Gemini keys from GEMINI_API_KEY; our .env uses GOOGLE_API_KEY.
-if GOOGLE_API_KEY:
-    os.environ.setdefault("GEMINI_API_KEY", GOOGLE_API_KEY)
+PRIMARY = "hr-primary"
+FALLBACK = "hr-fallback"
+# prompt caching is not used, so the router's cost table has nothing to record
+_NO_CACHE_COST = {"cache_creation_input_token_cost": 0, "cache_read_input_token_cost": 0}
 
 
-@lru_cache(maxsize=8)
-def get_llm(provider: str | None = None, model: str | None = None, temperature: float = LLM_TEMPERATURE) -> BaseChatModel:
-    provider = (provider or LLM_PROVIDER).lower()
-    if provider == "google":
-        if not GOOGLE_API_KEY:
-            raise RuntimeError("GOOGLE_API_KEY not set — add a Gemini API key to .env")
-        return ChatLiteLLM(
-            model_name=f"gemini/{model or GOOGLE_MODEL}",
-            temperature=temperature,
-            model_kwargs={"num_retries": 3, "timeout": 600},
-        )
-    if provider != "groq":
-        raise RuntimeError("LLM_PROVIDER must be either 'groq' or 'google'")
-    if not GROQ_API_KEY:
-        raise RuntimeError("GROQ_API_KEY not set — add a Groq API key to .env")
-    return ChatLiteLLM(
-        model_name=f"groq/{model or GROQ_MODEL}",
-        temperature=temperature,
-        model_kwargs={"num_retries": 3, "timeout": 600},
+@lru_cache(maxsize=1)
+def get_router() -> Router:
+    """Groq first, Gemini as fallback, 3 retries before the fallback is used."""
+    return Router(
+        model_list=[
+            {
+                "model_name": PRIMARY,
+                "litellm_params": {"model": f"groq/{GROQ_MODEL}", "api_key": GROQ_API_KEY},
+                "model_info": _NO_CACHE_COST,
+            },
+            {
+                "model_name": FALLBACK,
+                "litellm_params": {"model": f"gemini/{GOOGLE_MODEL}", "api_key": GOOGLE_API_KEY},
+                "model_info": _NO_CACHE_COST,
+            },
+        ],
+        fallbacks=[{PRIMARY: [FALLBACK]}],
+        num_retries=3,
+        timeout=600,
     )
 
 
-def _secondary_provider() -> str:
-    return "google" if LLM_PROVIDER == "groq" else "groq"
-
-
-def _provider_configured(provider: str) -> bool:
-    return bool(GOOGLE_API_KEY if provider == "google" else GROQ_API_KEY)
-
-
-def build_answer_llm() -> Runnable:
-    """A runnable that answers with the configured provider and, on failure,
-    transparently falls back to the other provider.
-
-    LangChain's ``with_fallbacks`` runs the secondary runnable whenever the
-    primary raises, so a Groq outage no longer hard-fails the API — Gemini is
-    the safety net (and vice-versa). Every call is counted for /metrics.
-    """
-    primary = LLM_PROVIDER
-    secondary = _secondary_provider()
-
-    def _run(inp, provider: str, fallback: bool = False):
-        llm = get_llm(provider)
-        if fallback:
-            LLM_FALLBACKS.inc()
-            LLM_CALLS.labels(provider=provider, result="fallback_ok").inc()
-        else:
-            LLM_CALLS.labels(provider=provider, result="primary_ok").inc()
-        return llm.invoke(inp)
-
-    main_runner: Runnable = RunnableLambda(lambda inp: _run(inp, primary))
-    if _provider_configured(secondary):
-        fallback_runner: Runnable = RunnableLambda(lambda inp: _run(inp, secondary, fallback=True))
-        return main_runner.with_fallbacks([fallback_runner])
-    return main_runner
+@lru_cache(maxsize=1)
+def get_llm() -> BaseChatModel:
+    """Chat model bound to the router, so every call gets its retries + fallback."""
+    llm = ChatLiteLLM(model=PRIMARY, temperature=LLM_TEMPERATURE)
+    llm.client = get_router()  # ChatLiteLLM defaults to the bare litellm module
+    return llm
