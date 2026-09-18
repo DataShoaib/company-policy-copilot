@@ -9,7 +9,6 @@ class LoginRequest(BaseModel):
 
 class SignupRequest(BaseModel):
     username: str = Field(..., min_length=1, max_length=100)
-    # bcrypt only uses the first 72 bytes anyway; 8 is a sane floor
     password: str = Field(..., min_length=8, max_length=72)
     full_name: str = Field(..., min_length=1, max_length=200)
 

@@ -1,7 +1,6 @@
-import hashlib
 from datetime import datetime, timezone
 
-from sqlalchemy import DateTime, String, delete, select
+from sqlalchemy import BigInteger, String, delete, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -19,17 +18,40 @@ class User(Base):
     role: Mapped[str] = mapped_column(String(50), nullable=False)
 
 
-class RefreshToken(Base):
-    """One row per issued JWT refresh token. Rows are single-use: consuming one
-    during rotation invalidates it, so a stolen refresh token cannot be handed
-    out / replayed for the token's full lifetime."""
+class ConsumedRefreshToken(Base):
+    """Ledger of already-redeemed refresh-token JTIs (single-use rotation).
 
-    __tablename__ = "refresh_tokens"
+    Lives in the application DB so rotation is enforced even without Redis.
+    Rows are only needed until their token's own expiry and are purged
+    opportunistically.
+    """
 
-    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
-    username: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
-    token_hash: Mapped[str] = mapped_column(String(64), nullable=False, unique=True, index=True)
-    expires_at: Mapped[datetime] = mapped_column(DateTime(), nullable=False)  # naive UTC
+    __tablename__ = "consumed_refresh_tokens"
+
+    jti: Mapped[str] = mapped_column(String(64), primary_key=True)
+    expires_at: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True)
+
+
+def consume_refresh_jti(jti: str, exp: float | None, ttl_fallback_seconds: int) -> bool:
+    """Atomically claim a refresh-token JTI.
+
+    Returns False if the JTI was already consumed (replay detected). The
+    PRIMARY KEY insert acts as the atomic check-and-set, mirroring Redis
+    ``SET NX`` semantics without requiring Redis.
+    """
+    now = int(datetime.now(timezone.utc).timestamp())
+    expires_at = int(exp) if exp else now + ttl_fallback_seconds
+
+    with SessionLocal() as db:
+        # Opportunistic purge: rows past their token's expiry are dead weight.
+        db.execute(delete(ConsumedRefreshToken).where(ConsumedRefreshToken.expires_at <= now))
+        db.add(ConsumedRefreshToken(jti=jti, expires_at=expires_at))
+        try:
+            db.commit()
+        except IntegrityError:
+            db.rollback()
+            return False
+    return True
 
 
 def _as_dict(user: User) -> dict:
@@ -94,45 +116,3 @@ def seed_demo_users() -> None:
     for username, password, full_name, role in demo_users:
         if get_user(username) is None:
             register_user(username, password, full_name, role)
-
-
-def _token_hash(token: str) -> str:
-    return hashlib.sha256(token.encode("utf-8")).hexdigest()
-
-
-def store_refresh_token(token: str, username: str, expires_at: datetime) -> None:
-    # Store a naive UTC timestamp so the expiry check below is safe on both
-    # SQLite (which returns naive datetimes) and PostgreSQL.
-    if expires_at.tzinfo is not None:
-        expires_at = expires_at.astimezone(timezone.utc).replace(tzinfo=None)
-    with SessionLocal() as db:
-        db.add(RefreshToken(username=username, token_hash=_token_hash(token), expires_at=expires_at))
-        try:
-            db.commit()
-        except IntegrityError:
-            db.rollback()
-
-
-def consume_refresh_token(token: str, username: str) -> bool:
-    """Single-use: delete the stored row for this token. Once consumed it can
-    never be presented again, which is what makes refresh rotation work."""
-    token_hash = _token_hash(token)
-    with SessionLocal() as db:
-        row = db.scalar(
-            select(RefreshToken).where(
-                RefreshToken.token_hash == token_hash,
-                RefreshToken.username == username,
-            )
-        )
-        if row is None:
-            return False
-        db.delete(row)
-        db.commit()
-        utc_now = datetime.now(timezone.utc).replace(tzinfo=None)
-        return row.expires_at is None or row.expires_at >= utc_now
-
-
-def revoke_user_refresh_tokens(username: str) -> None:
-    with SessionLocal() as db:
-        db.execute(delete(RefreshToken).where(RefreshToken.username == username))
-        db.commit()
