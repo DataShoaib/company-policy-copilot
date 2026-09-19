@@ -3,12 +3,9 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
+load_dotenv()
+
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-
-# Anchored to the repo instead of the current directory, so the API, the
-# scripts and the notebook all read the same file from any working directory.
-load_dotenv(PROJECT_ROOT / ".env")
-
 POLICIES_DIR = PROJECT_ROOT / "data" / "policies"
 EVAL_DIR = PROJECT_ROOT / "data" / "eval"
 
