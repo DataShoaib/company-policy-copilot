@@ -1,8 +1,16 @@
+from pathlib import Path
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# src/hr_rag/api/core/settings.py -> the project root is four levels up. Pointing
+# at an absolute path matters: a relative ".env" is resolved against the current
+# directory, so the API would silently fall back to the defaults below (a
+# placeholder JWT secret, a SQLite file next to wherever it was launched).
+_ENV_FILE = Path(__file__).resolve().parents[4] / ".env"
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    model_config = SettingsConfigDict(env_file=_ENV_FILE, extra="ignore")
 
     jwt_secret_key: str = "CHANGE_ME_IN_PRODUCTION_use_openssl_rand_hex_32"
     jwt_algorithm: str = "HS256"

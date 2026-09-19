@@ -135,6 +135,8 @@ An evaluation set ([`data/eval/qa_dataset.py`](data/eval/qa_dataset.py)) keeps t
 
 MLflow tracks the offline retrieval experiments.
 
+Every `/query` request runs as a single `hr-rag-request` trace: input/output LLM guardrails, `policy-retrieval`, and `answer-generation` (prompt → LLM → parser) hang off one root with `role`, `category`, and allowed-category metadata. When no key is configured tracing is disabled entirely (verified by `_verify_trace.py`).
+
 Query volume, end-to-end latency, cache hits, auth outcomes, RBAC denials, and LLM calls/fallbacks are visible via the API responses and the Streamlit client (latency + cache badge per answer).
 
 ## Reliability
