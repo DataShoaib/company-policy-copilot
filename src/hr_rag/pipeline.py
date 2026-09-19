@@ -53,6 +53,9 @@ class HRPolicyRAGPipeline:
 
     def answer(self, question: str, category: str | None = None, allowed_categories: list[str] | None = None) -> tuple[str, list[Document]]:
         docs = self.retrieve(question, category=category, allowed_categories=allowed_categories)
+        return self.answer_from_documents(question, docs)
+
+    def answer_from_documents(self, question: str, docs: list[Document]) -> tuple[str, list[Document]]:
         if not docs:
             return (
                 "I don't have information on that in the policy documents I can access for your role. Please check with HR directly.",
