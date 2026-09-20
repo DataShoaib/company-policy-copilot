@@ -1,5 +1,6 @@
 import time
 
+from langchain_core.documents import Document
 from langchain_core.runnables import RunnableLambda
 
 from hr_rag.api.core.rbac import allowed_categories_for_role
@@ -15,26 +16,48 @@ from hr_rag.api.services.guardrails import (
     check_output_guardrails,
     check_output_guardrails_llm,
 )
-from hr_rag.pipeline import get_pipeline
+from hr_rag.formatting import format_docs
+from hr_rag.pipeline import _clean_answer, get_pipeline
 from hr_rag.retrievers.router import route_question
 
 MAX_RETRIES = 2
 RETRY_BACKOFF_SECONDS = 1.5
 
 
-def _answer_with_retry(question: str, category: str | None, allowed_categories: list[str]):
+# Module-level retrieval step — creates a visible LangChain span named "policy-retrieval"
+_retrieval_step = RunnableLambda(
+    lambda ctx: get_pipeline().retrieve(
+        ctx["question"],
+        category=ctx.get("category"),
+        allowed_categories=ctx.get("allowed_categories"),
+    ),
+    name="policy-retrieval",
+)
+
+
+def _retrieve(question: str, category: str | None, allowed_categories: list[str]) -> list[Document]:
+    """Retrieve docs with a child trace span named 'policy-retrieval'."""
+    return _retrieval_step.invoke({
+        "question": question,
+        "category": category,
+        "allowed_categories": allowed_categories,
+    })
+
+
+def _generate_with_retry(context: str, question: str) -> str:
+    """Generate answer with retry (retrieval is not retried — local Qdrant call)."""
     pipeline = get_pipeline()
     last_error = None
-
     for attempt in range(1, MAX_RETRIES + 2):
         try:
-            return pipeline.answer(question, category=category, allowed_categories=allowed_categories)
+            raw = pipeline._answer_chain.invoke({"context": context, "question": question})
+            return _clean_answer(raw)
         except Exception as e:  # noqa: BLE001 - retry any transient provider failure
             last_error = e
             if attempt <= MAX_RETRIES:
                 time.sleep(RETRY_BACKOFF_SECONDS * attempt)
                 continue
-            raise RuntimeError(f"pipeline failed after {MAX_RETRIES + 1} attempts: {last_error}") from last_error
+            raise RuntimeError(f"generation failed after {MAX_RETRIES + 1} attempts: {last_error}") from last_error
 
 
 def answer_question(question: str, role: str, category: str | None = None) -> tuple[str, list[dict], bool, int]:
@@ -77,7 +100,12 @@ def _answer_question(payload: dict) -> tuple[str, list[dict], bool, int]:
     if not routed_categories:
         return "I don't have access to that policy category for your role. Please check with HR directly.", [], False, int((time.time() - start) * 1000)
 
-    answer, docs = _answer_with_retry(question, routed_categories[0] if len(routed_categories) == 1 else None, routed_categories)
+    docs = _retrieve(question, routed_categories[0] if len(routed_categories) == 1 else None, routed_categories)
+    if not docs:
+        return "I don't have information on that in the policy documents I can access for your role. Please check with HR directly.", [], False, int((time.time() - start) * 1000)
+
+    context = format_docs(docs)
+    answer = _generate_with_retry(context, question)
 
     sources = [
         {
