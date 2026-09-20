@@ -122,7 +122,9 @@ def _answer_question(payload: dict) -> tuple[str, list[dict], bool, int]:
     if output_blocked:
         return output_blocked["detail"], [], False, int((time.time() - start) * 1000)
 
-    output_blocked_llm = check_output_guardrails_llm(answer, context_chunks)
+    refusal_markers = ("This is not covered in the policy documents.", "not have information on that")
+    is_plain_refusal = any(m in answer for m in refusal_markers)
+    output_blocked_llm = None if is_plain_refusal else check_output_guardrails_llm(answer, context_chunks)
     if output_blocked_llm:
         return output_blocked_llm["detail"], [], False, int((time.time() - start) * 1000)
 
