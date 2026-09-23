@@ -19,7 +19,7 @@ GOOGLE_MODEL = os.getenv("GOOGLE_MODEL", "gemini-3.5-flash-lite")
 LLM_TEMPERATURE = 0
 
 DEFAULT_TOP_K = 3
-RERANK_CANDIDATE_K = 10
+RERANK_CANDIDATE_K = 5
 
 CATEGORIES = [
     "leave", "compensation", "conduct", "performance", "recruitment",

@@ -51,6 +51,11 @@ class HRPolicyRAGPipeline:
             i += 1
         return merged
 
+    @staticmethod
+    def _clean_answer(answer: str) -> str:
+        answer = re.sub(r"<think>.*?</think>", "", answer, flags=re.DOTALL | re.IGNORECASE)
+        answer = re.sub(r"<reasoning>.*?</reasoning>", "", answer, flags=re.DOTALL | re.IGNORECASE)
+        return answer.strip()
     def answer(self, question: str, category: str | None = None, allowed_categories: list[str] | None = None) -> tuple[str, list[Document]]:
         docs = self.retrieve(question, category=category, allowed_categories=allowed_categories)
         if not docs:
@@ -61,10 +66,7 @@ class HRPolicyRAGPipeline:
         answer = self._answer_chain.invoke({"context": format_docs(docs), "question": question})
         return _clean_answer(answer), docs
 
-def _clean_answer(answer: str) -> str:
-    answer = re.sub(r"<think>.*?</think>", "", answer, flags=re.DOTALL | re.IGNORECASE)
-    answer = re.sub(r"<reasoning>.*?</reasoning>", "", answer, flags=re.DOTALL | re.IGNORECASE)
-    return answer.strip()
+_clean_answer = HRPolicyRAGPipeline._clean_answer
 
 
 def pipeline_is_loaded() -> bool:

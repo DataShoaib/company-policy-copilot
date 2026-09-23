@@ -1,13 +1,31 @@
 import base64
 import json
 import os
+import sys
 from datetime import datetime, timezone
 
 import requests
 import streamlit as st
 
-API_URL = os.getenv("API_URL", "http://localhost:8000").rstrip("/")
+DEFAULT_API_URL = "http://localhost:8000"
 REQUEST_TIMEOUT = (5, 90)
+
+
+def _initial_api_url() -> str:
+    """`--api-url` flag wins, then the API_URL env var, then the default."""
+    argv = sys.argv[1:]
+    for index, arg in enumerate(argv):
+        if arg == "--api-url" and index + 1 < len(argv):
+            return argv[index + 1].rstrip("/")
+        if arg.startswith("--api-url="):
+            return arg.split("=", 1)[1].rstrip("/")
+    return os.getenv("API_URL", DEFAULT_API_URL).rstrip("/")
+
+
+def api_url() -> str:
+    """Backend base URL. The sidebar field can repoint it without a restart."""
+    return st.session_state.get("api_url") or _initial_api_url()
+
 
 CATEGORY_LABELS = {
     None: "🌐 All allowed policies",
@@ -21,8 +39,6 @@ CATEGORY_LABELS = {
     "legal": "📜 Legal & Compliance",
     "operations": "🏢 Operations",
 }
-LABEL_TO_CATEGORY = {label: cat for cat, label in CATEGORY_LABELS.items()}
-
 ROLE_ALLOWED = {
     "employee": ["leave", "conduct", "recruitment", "it", "operations"],
     "manager": ["leave", "conduct", "recruitment", "performance", "it", "operations"],
@@ -62,6 +78,11 @@ for _key, _default in {
 }.items():
     st.session_state.setdefault(_key, _default)
 
+# Seeded with a real value (not None) so the sidebar widget shows it and the
+# widget/session-state pair can't disagree about the default backend URL.
+if not st.session_state.get("api_url"):
+    st.session_state["api_url"] = _initial_api_url()
+
 
 def is_logged_in() -> bool:
     return bool(st.session_state.access_token)
@@ -80,7 +101,7 @@ def jwt_claims(token: str | None) -> dict:
 
 def _post(path: str, payload: dict, token: str | None = None):
     headers = {"Authorization": f"Bearer {token}"} if token else {}
-    return requests.post(f"{API_URL}{path}", json=payload,
+    return requests.post(f"{api_url()}{path}", json=payload,
                          headers=headers, timeout=REQUEST_TIMEOUT)
 
 
@@ -117,7 +138,7 @@ def api_login(username: str, password: str) -> tuple[bool, str]:
                                      "password": password})
     except requests.RequestException as exc:
         return False, (f"API unreachable ({exc.__class__.__name__}) — "
-                       f"is the backend running on {API_URL}?")
+                       f"is the backend running on {api_url()}?")
     if resp.status_code == 200:
         data = resp.json()
         st.session_state.update(access_token=data["access_token"],
@@ -138,7 +159,7 @@ def api_signup(username: str, password: str, full_name: str) -> tuple[bool, str]
                                       "full_name": full_name.strip()})
     except requests.RequestException as exc:
         return False, (f"API unreachable ({exc.__class__.__name__}) — "
-                       f"is the backend running on {API_URL}?")
+                       f"is the backend running on {api_url()}?")
     if resp.status_code == 200:
         data = resp.json()
         st.session_state.update(access_token=data["access_token"],
@@ -161,7 +182,7 @@ def api_provision(username: str, password: str, full_name: str,
                          token=st.session_state.access_token)
         except requests.RequestException as exc:
             return False, (f"API unreachable ({exc.__class__.__name__}) — "
-                           f"is the backend running on {API_URL}?")
+                           f"is the backend running on {api_url()}?")
         if resp.status_code == 401 and attempt == 1 and try_refresh():
             continue
         break
@@ -189,8 +210,9 @@ def api_ask(question: str, category: str | None) -> dict:
             resp = _post("/query", payload, token=st.session_state.access_token)
         except requests.RequestException:
             return {"ok": False,
-                    "message": ("Backend unreachable — start it with "
-                                "`uvicorn hr_rag.api.main:app --port 8000`.")}
+                    "message": (f"Backend unreachable — nothing is answering on "
+                                f"{api_url()}. Start it, or point the sidebar's "
+                                f"Backend field at the right URL.")}
         if resp.status_code == 200:
             return {"ok": True, **resp.json()}
         if resp.status_code == 401 and attempt == 1 and try_refresh():
@@ -598,10 +620,25 @@ with st.sidebar:
                 unsafe_allow_html=True)
     st.caption("Grounded answers from official company policies")
 
+    with st.expander("⚙️ Backend", expanded=not is_logged_in()):
+        st.text_input("API URL", key="api_url",
+                      help="Sign-in and every answer are sent to this address.")
+        if st.button("Check connection", use_container_width=True):
+            try:
+                probe = requests.get(f"{api_url()}/health", timeout=(3, 10))
+                if probe.status_code == 200:
+                    st.success(f"Connected · {probe.json()}")
+                else:
+                    st.error(f"HTTP {probe.status_code} from {api_url()}/health")
+            except (requests.RequestException, ValueError) as exc:
+                st.error(f"No backend on {api_url()} ({exc.__class__.__name__})")
+
+
     if is_logged_in():
         claims = jwt_claims(st.session_state.access_token)
         name = claims.get("sub") or st.session_state.username or "user"
         role = st.session_state.role or "employee"
+        st.sidebar.success(f"Signed in as **{name}** ({role})")
         color = ROLE_COLORS.get(role, "#cccccc")
         allowed = ROLE_ALLOWED.get(role, [])
         scope_chips = "".join(
@@ -679,7 +716,8 @@ with st.sidebar:
                 if ok:
                     st.toast(f"Welcome back, {st.session_state.username}! 👋")
                     st.rerun()
-                st.error(msg)
+                else:
+                    st.error(msg)
 
         with tab_signup:
             su_user = st.text_input("Choose username", key="su_user")
@@ -693,10 +731,11 @@ with st.sidebar:
                 if ok:
                     st.toast("Account created 🎉")
                     st.rerun()
-                st.error(msg)
+                else:
+                    st.error(msg)
 
     st.divider()
-    st.caption(f"API · `{API_URL}`\n\nEvery answer cites its source document.")
+    st.caption(f"API · `{api_url()}`\n\nEvery answer cites its source document.")
 
 
 st.markdown(

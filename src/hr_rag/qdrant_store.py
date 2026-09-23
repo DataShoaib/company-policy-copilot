@@ -1,4 +1,3 @@
-
 from langchain_core.documents import Document
 from qdrant_client import QdrantClient, models
 

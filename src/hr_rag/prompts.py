@@ -20,6 +20,7 @@ Question: {question}
 
 Answer:""")
 
+# Experimental — used only by notebooks/experiments.ipynb (HyDE lost to baseline in eval); kept for reproducibility.
 HYDE_PROMPT = ChatPromptTemplate.from_template("""
 Write a short passage (3-4 sentences) in the style of an HR policy document that would answer this question.
 
@@ -27,6 +28,7 @@ Question: {question}
 
 Passage:""")
 
+# Experimental — used only by notebooks/experiments.ipynb (rewrite added latency, zero metric gain); kept for reproducibility.
 QUERY_REWRITE_PROMPT = ChatPromptTemplate.from_template("""
 Rewrite this into a clear, formal HR-policy-search query. Expand casual/Hinglish phrasing into proper terms.
 Return only the rewritten query.
