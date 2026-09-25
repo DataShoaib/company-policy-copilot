@@ -1,168 +1,308 @@
 # Company Policy Copilot
 
-![CI](https://github.com/DataShoaib/company-policy-copilot/actions/workflows/ci.yml/badge.svg)
-![Python](https://img.shields.io/badge/python-3.10%2B-blue)
-![FastAPI](https://img.shields.io/badge/FastAPI-009688?logo=fastapi&logoColor=white)
-![LangChain](https://img.shields.io/badge/LangChain-1C3C3C?logo=langchain&logoColor=white)
-![Qdrant](https://img.shields.io/badge/Qdrant-DC382D?logo=qdrant&logoColor=white)
-![Redis](https://img.shields.io/badge/Redis-DC382D?logo=redis&logoColor=white)
-![PostgreSQL](https://img.shields.io/badge/PostgreSQL-4169E1?logo=postgresql&logoColor=white)
-![Docker](https://img.shields.io/badge/Docker-2496ED?logo=docker&logoColor=white)
-![Code style](https://img.shields.io/badge/lint-ruff-261230)
-![Tests](https://img.shields.io/badge/unit%20tests-passing-brightgreen)
-![License](https://img.shields.io/badge/license-MIT-green)
+A production-grade **Retrieval-Augmented Generation (RAG)** system that answers employee questions about company HR policies — with role-based access control, guardrails, caching, and full observability.
 
-Grounded Q&A over **a company's internal policy knowledge base** — policies spread across HR, Finance, IT Security, Legal Compliance and Operations. Employees ask the same questions repeatedly; this answers them **only from the official documents**, scoped to what each role is allowed to see.
+Built for **TechCorp India Pvt. Ltd.** (fictional organization used for policy content).
 
-```
-"How many days of casual leave do I get?"        → grounded answer + sources (cached: ~ms)
-"What is the bonus formula for L4?" as employee  → access denied (RBAC, enforced at retrieval)
-```
+[![Python](https://img.shields.io/badge/python-3.10%2B-blue)](https://www.python.org/)
+[![FastAPI](https://img.shields.io/badge/FastAPI-0.115%2B-009688)](https://fastapi.tiangolo.com/)
+[![Streamlit](https://img.shields.io/badge/Streamlit-1.40%2B-FF4B4B)](https://streamlit.io/)
+[![Qdrant](https://img.shields.io/badge/Qdrant-vector%20DB-DC244C)](https://qdrant.tech/)
+[![License](https://img.shields.io/badge/license-MIT-green)](#license)
 
-## The problem it solves
+---
 
-In any growing company the same policy questions land on HR and team leads every single week — *leave balances, expense limits, probation rules, bonus eligibility*. The answers exist, but they are buried inside department documents spread across wikis, shared drives and PDFs — and some of them (salary bands, bonus formulas) are sensitive. Generic chatbots make all of this worse: they hallucinate numbers, ignore access rules, and bill you tokens for every repeat.
+## Overview
 
-| Real pain | What this repo does about it |
+HR Policy Copilot lets employees log in, ask natural-language questions about HR policy, and get answers grounded strictly in the company's policy documents — scoped to what their role is allowed to see.
+
+**How a query flows through the system:**
+
+1. User logs in and gets a JWT (role embedded in the token).
+2. Question passes through an input guardrail (regex + LLM judge) to catch injections, off-topic queries, and PII.
+3. A Redis cache is checked using a **role-scoped** cache key (no cross-role leakage).
+4. The question is routed to one or more of 9 policy categories, restricted to what the user's role can access.
+5. Relevant chunks are retrieved from Qdrant.
+6. An LLM generates a grounded answer from the retrieved context.
+7. The answer passes through an output guardrail (PII-leak + hallucination check) before being cached and returned.
+8. The Streamlit UI displays the answer, its sources, latency, and cache status.
+
+---
+
+## Features
+
+### Authentication & User Management
+- Self-service signup (always provisioned as `employee` — role cannot be self-selected)
+- JWT-based login: 30-minute access token + 7-day refresh token
+- Token refresh endpoint
+- Admin-only user provisioning (`hr_admin` can create users with any role)
+- **Retrieval-level RBAC** — access is enforced by restricting which Qdrant collections are searched, not just by blocking routes. An `employee` can never retrieve finance/legal documents, even indirectly.
+
+### Query Pipeline
+A 7-stage pipeline for every question:
+1. Regex input guardrail (empty input, prompt-injection patterns, PII patterns — Aadhaar, PAN, phone, email)
+2. Redis cache lookup (role-scoped key, ~5ms on hit)
+3. LLM-based input guardrail (classifies as safe / prompt injection / off-topic / PII) — fails open if the LLM is unreachable
+4. Category routing (explicit category if provided and allowed, otherwise keyword-based routing across all allowed categories)
+5. Retrieval from Qdrant (single-category direct fetch, or round-robin merge across categories, top-3 results)
+6. Answer generation with a strict, anti-refusal prompt and automatic retry (2 attempts, exponential backoff)
+7. Output guardrails: PII-leak check and an LLM hallucination judge
+
+### Caching
+- Redis-backed answer cache, keyed by a hash of `scope | category | question`
+- Role scope is part of the cache key, so a cached answer can never leak across roles
+- 1-hour TTL (configurable)
+- Only non-empty, sourced answers are cached — refusals are always evaluated fresh
+
+### Rate Limiting
+- 20 requests/minute per user on the query endpoint
+- 5 requests/minute on login (brute-force protection)
+- Redis-backed, safe across multiple workers
+- Toggleable via configuration
+
+### Frontend (Streamlit)
+- Login screen with configurable backend URL
+- Role badge, category selector, and chat interface
+- One-click example questions for smoke testing
+- Expandable source citations (category, document ID, title, snippet)
+- Latency and cache-hit indicators
+- Admin panel for provisioning new users (visible only to `hr_admin`)
+
+### Refusal Handling
+Refusals are returned as **HTTP 200**, not 403 — with a polite message and (where relevant) supporting sources, so the frontend doesn't need special error handling. Three refusal types are supported: out-of-role-scope, no matching documents, and LLM-judged "not covered by policy."
+
+### Evaluation & Testing
+- 13-question golden evaluation set (currently 13/13 pass rate on the production prompt)
+- 61 automated tests covering routes, RBAC, caching, guardrails, the pipeline, and the frontend
+- Notebooks for retrieval experiments (e.g., BM25 vs. vector search)
+- Linted with Ruff on every commit
+
+### Observability
+- **LangSmith** tracing — one root span per query, with child spans for retrieval, generation, and guardrail checks
+- **MLflow** for experiment tracking, with optional **DagsHub** remote backend
+- **Ragas** for RAG evaluation metrics
+
+---
+
+## Tech Stack
+
+| Layer | Technology |
 |---|---|
-| HR keeps answering the same ~20 questions | Self-serve assistant; identical questions served from cache in milliseconds, zero LLM cost |
-| One answer is split across departments — *"referral bonus timing"* lives in Recruitment **and** Compensation | Keyword router selects the right collections; multi-hop questions pool across all allowed ones |
-| LLMs confidently invent numbers (made-up leave days that don't match the official policy) | Grounded generation — answers come only from retrieved chunks, and every response cites its sources so employees can verify |
-| Sensitive policies must not leak (salary bands, bonus formulas) | RBAC is enforced **inside retrieval**: an employee's request never touches compensation vectors — a forgotten route check can't leak anything |
-| Real users type paraphrases/Hinglish that break keyword search | Hybrid BM25 + dense retrieval handles *"mera baby hone wala hai, third child, kitni maternity leave milegi?"* → 12 weeks |
-| Uncontrolled usage silently burns API budget | Per-user sliding-window rate limits; if Redis is down the service fails closed instead of running unthrottled |
+| Language / Runtime | Python 3.10–3.13, Uvicorn (ASGI) |
+| Backend API | FastAPI, Pydantic v2, `pydantic-settings` |
+| Frontend | Streamlit |
+| LLM Gateway | LiteLLM Router — Groq (primary) with Gemini fallback, via LangChain `ChatLiteLLM` |
+| Vector Store | Qdrant (Docker or local file fallback), 9 category-scoped collections |
+| Embeddings | `sentence-transformers/all-MiniLM-L6-v2` (384-dim, local) |
+| Chunking | `langchain-text-splitters`, 500-token chunks / 50-token overlap |
+| Auth | JWT (`python-jose`, HS256), `passlib[bcrypt]` |
+| Database | SQLite (dev) or PostgreSQL (Docker) via SQLAlchemy 2.0 |
+| Cache / Rate Limiting | Redis |
+| Tracing / Evaluation | LangSmith, MLflow, DagsHub, Ragas |
+| Infra | Docker Compose (Qdrant, Redis, Postgres, API), Ruff, Pytest |
 
-**A representative exchange** (from the eval set):
+---
 
-> **Q:** *mera baby hone wala hai, third child, kitni maternity leave milegi?*
-> **A:** For the third child onwards, maternity leave entitlement is 12 weeks — reduced from the 26 weeks given for the first two children.
-> **Sources:** Leave Policy — *"…third child onwards… reduced entitlement…"*
+## Architecture
 
-## How it works
-
-```mermaid
-flowchart LR
-    UI["Streamlit client"] -->|JWT Bearer| API["FastAPI<br/>auth · query · health"]
-    API -->|per-user window| RL["Redis<br/>rate limiting"]
-    API -->|scope+question key| C["Redis<br/>answer cache"]
-    API --> P["RAG pipeline"]
-    P -->|"route → allowed collections"| Q[("Qdrant<br/>per-category collections")]
-    P -->|"grounded prompt"| LLM["Groq / Gemini"]
-    API --> DB[("PostgreSQL / SQLite<br/>users + refresh tokens")]
+```
+                         ┌─────────────────┐
+                         │   Streamlit UI   │  (port 8502)
+                         └────────┬─────────┘
+                                  │ REST
+                         ┌────────▼─────────┐
+                         │   FastAPI API     │  (port 8001)
+                         │  auth · query ·   │
+                         │  health           │
+                         └────────┬─────────┘
+                                  │
+        ┌─────────────┬──────────┼──────────┬──────────────┐
+        ▼             ▼          ▼          ▼              ▼
+   Input Guard   Redis Cache  Router   Qdrant Retrieval  Output Guard
+   (regex+LLM)   (role-scoped) (keyword) (9 collections)  (PII+halluc.)
+                                  │
+                                  ▼
+                         LiteLLM Router
+                         Groq → Gemini fallback
 ```
 
-**Request path:** JWT check → rate limit → cache lookup (permission-guarded) → keyword routing over role-allowed categories → per-category vector search → grounded prompt → answer + cited sources.
+Policy categories (9 total, each its own Qdrant collection):
+`leave` · `compensation` · `conduct` · `performance` · `recruitment` · `finance` · `it` · `legal` · `operations`
 
-## Design decisions
+---
 
-- **Category-scoped retrieval** — each department gets its own Qdrant collection; a finance question never searches IT or Legal. Smaller search space, and it's what makes RBAC cheap.
-- **RBAC at the retrieval layer, not the route** — an employee-role request *cannot* reach compensation chunks even if a route check is forgotten; `allowed_categories` bounds every collection touch.
-- **Permission-guarded cache** — cached answers are reused only if their source categories are a subset of the asking user's role. A privileged answer is never served to a lower role.
-- **Deterministic routing** — explicit category validated against role first; otherwise keyword hits pick collections; ambiguity falls back to all allowed categories.
-- **Fail-closed dependencies** — Redis down ⇒ login/query return 503 rather than running unthrottled.
-- **Retry, not circuit breaker** — two retries on flaky LLM calls; a real breaker matters at traffic this tool doesn't see.
+## Project Structure
 
-## Quickstart
+```
+hr-policy-copilot/
+├── .env.example                 # Environment variable template
+├── docker-compose.yml           # qdrant + redis + postgres + api
+├── pyproject.toml               # Dependencies, Ruff config, Pytest config
+├── run-hr.bat                   # Windows one-click launcher
+│
+├── data/
+│   ├── policies/                # 9 markdown policy documents (HRP-001 … HRP-009)
+│   ├── eval/                    # 13-question evaluation set
+│   ├── hr_policy.db             # SQLite users DB (dev)
+│   └── qdrant/                  # Local Qdrant fallback storage
+│
+├── docker/
+│   └── Dockerfile               # API image
+│
+├── frontend/
+│   └── app.py                   # Streamlit UI (login, chat, admin panel)
+│
+├── src/hr_rag/
+│   ├── config.py                # Constants, models, categories, tracing setup
+│   ├── pipeline.py              # Retrieval + generation chains, Qdrant verification
+│   ├── prompts.py                # Answer prompt (anti-refusal), HyDE / rewrite prompts
+│   ├── llm.py                    # LiteLLM Router (Groq → Gemini)
+│   ├── embeddings.py            # Embedding model loader (singleton)
+│   ├── chunking.py               # Document chunking
+│   ├── data_loading.py          # Loads policy docs + metadata
+│   ├── formatting.py             # Formats retrieved docs into context
+│   ├── qdrant_store.py          # Qdrant collection management
+│   ├── retrievers/
+│   │   └── router.py             # Keyword-based category router
+│   └── api/
+│       ├── main.py               # App factory, lifespan, CORS, routers
+│       ├── core/
+│       │   ├── settings.py       # Environment-driven settings
+│       │   ├── security.py       # JWT + password hashing
+│       │   ├── rbac.py           # Role → allowed categories
+│       │   ├── redis_client.py   # Redis singleton
+│       │   └── rate_limit.py     # Redis-backed rate limiter
+│       ├── routes/
+│       │   ├── auth.py           # signup / login / refresh / provision
+│       │   ├── query.py          # POST /query
+│       │   └── health.py         # GET /health
+│       └── services/
+│           ├── rag_service.py    # 7-stage pipeline orchestrator
+│           ├── guardrails.py     # Input/output guardrails
+│           └── cache.py          # Cache get/set, scope fingerprinting
+│
+├── tests/                        # 61 automated tests
+└── notebooks/                    # Retrieval experiments
+```
 
+---
+
+## Results & Benchmarks
+
+### Performance
+| Metric | Value |
+|---|---|
+| Median query latency (cache miss) | ~2s (p50), ~5s (p95 — varies with LLM provider) |
+| Cache-hit latency | ~5ms |
+| Test suite | 61/61 passing |
+| Anti-refusal prompt eval | 13/13 |
+| Linting | Ruff clean |
+
+### Retrieval Strategy Experiments
+Six retrieval strategies were benchmarked on a 5-question, category-balanced eval set and scored on 5 RAGAS metrics, with every run tracked in MLflow and traced end-to-end in LangSmith:
+
+| Strategy | Faithfulness | Correctness | Latency | Outcome |
+|---|---|---|---|---|
+| **Baseline (dense retrieval)** | **0.83** | **0.76** | ~37s | **Selected for production** |
+| Hybrid (BM25 + dense) | 0.50 | — | — | Rejected — faithfulness regression |
+| Contextual compression | — | — | ~392s | Rejected — ~10× slower than baseline |
+| Query rewrite | — | — | — | Evaluated, not selected |
+| HyDE | — | — | — | Evaluated, not selected |
+| Metadata filtering | — | — | — | Evaluated, not selected |
+
+Baseline dense retrieval outperformed every added-complexity strategy on faithfulness/correctness while staying fastest, and was shipped to production as-is.
+
+---
+
+## Getting Started
+
+### Prerequisites
+- Python 3.10–3.13
+- Docker & Docker Compose
+- API keys for Groq and Google (Gemini)
+
+### 1. Clone and configure
 ```bash
-python -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
+git clone https://github.com/DataShoaib/company-policy-copilot.git
+cd company-policy-copilot
+cp .env.example .env
+# Fill in GROQ_API_KEY, GOOGLE_API_KEY, LANGSMITH_API_KEY, etc.
+```
+
+### 2. Start infrastructure
+```bash
+docker-compose up -d qdrant redis postgres
+```
+
+### 3. Install dependencies
+```bash
 pip install -e .
-cp .env.example .env        # add GROQ_API_KEY, GOOGLE_API_KEY (fallback), JWT_SECRET_KEY
-python scripts/ingest.py    # builds the per-category Qdrant collections once
-docker compose up -d redis  # rate limiting + caching backend
-uvicorn hr_rag.api.main:app --port 8000
-streamlit run frontend/app.py
 ```
 
-Or everything containerized: `docker compose up --build` (PostgreSQL + Qdrant + Redis + FastAPI), then Streamlit separately.
+### 4. Run the backend
+```bash
+uvicorn src.hr_rag.api.main:app --reload --port 8001
+```
 
-**Windows one-click:** `run-hr.bat` starts the API on `:8001` and the UI on `:8502` (off the default ports, so it coexists with other projects on 8000/8501) under `API_URL=http://localhost:8001`. Requires Redis + Qdrant running (`docker compose up -d redis qdrant`).
+### 5. Run the frontend
+```bash
+streamlit run frontend/app.py --server.port 8502 -- --api-url http://localhost:8001
+```
 
-## API
+### 6. Try it out
+- API docs: `http://localhost:8001/docs`
+- Health check: `http://localhost:8001/health`
+- UI: `http://localhost:8502`
 
-| Method | Path | Auth | Notes |
-|---|---|---|---|
-| POST | `/auth/signup` | — | always creates `employee`; elevated roles via provision |
-| POST | `/auth/login` | — | 5 attempts/min/user; issues access (30 min) + single-use refresh (7 days) |
-| POST | `/auth/refresh` | refresh token | rotation: old token consumed, replay → 401 |
-| POST | `/auth/provision` | `hr_admin` | create users with any role |
-| POST | `/query` | any user | `{question, category?}` → answer + cited sources |
-| GET | `/health` | — | Redis connectivity + pipeline status |
+> On Windows, `run-hr.bat` starts everything with one click.
+
+---
+
+## Configuration
+
+Key environment variables (see `.env.example` for the full list):
+
+| Variable | Purpose |
+|---|---|
+| `GROQ_API_KEY` / `GROQ_MODEL` | Primary LLM provider |
+| `GOOGLE_API_KEY` / `GOOGLE_MODEL` | Fallback LLM provider |
+| `DATABASE_URL` | SQLite (dev) or PostgreSQL (Docker) connection string |
+| `REDIS_URL` | Cache and rate-limit backend |
+| `QDRANT_URL` | Vector DB endpoint (leave empty to use local file fallback) |
+| `LANGSMITH_API_KEY` / `LANGSMITH_PROJECT` | Tracing |
+| `JWT_SECRET` | **Must be overridden in production** |
+| `CACHE_TTL_SECONDS` | Answer cache TTL (default 3600) |
+| `RATE_LIMIT_PER_MINUTE` | Query rate limit |
+| `LOGIN_RATE_LIMIT_PER_MINUTE` | Login rate limit |
+
+---
+
+## Testing
 
 ```bash
-curl -X POST localhost:8000/auth/login -H "Content-Type: application/json" \
-  -d '{"username": "employee1", "password": "employee123"}'
-
-curl -X POST localhost:8000/query -H "Authorization: Bearer <token>" \
-  -H "Content-Type: application/json" \
-  -d '{"question": "How many days of casual leave do I get?"}'
+pytest
+ruff check .
 ```
 
-Seeded demo users: `employee1/employee123`, `manager1/manager123`, `hradmin1/hradmin123`.
+61 tests cover authentication, RBAC enforcement, caching, guardrails, the retrieval pipeline, and the Streamlit frontend (via `AppTest`).
 
-## Roles & provisioning
+---
 
-**Provisioning** = an HR admin creating an account for someone else *with the role already attached*. It is the only way an elevated role comes into existence:
+## Known Limitations
 
-- **Self-service signup** (`POST /auth/signup`, or *Create account* in the sidebar) always yields **`employee`** — `role` isn't a field on the request at all, so nobody can self-assign privileges.
-- **`POST /auth/provision`** is `hr_admin`-only (401 without a token, 403 for any other role) and accepts `role` ∈ `employee` · `manager` · `finance_user` · `hr_admin`. It creates the account and returns a token pair *for the new user*; the admin UI deliberately discards those tokens, so provisioning never silently swaps the admin into the account they just created. The teammate signs in themselves with the temporary password.
-- **In the UI**: sign in as `hradmin1` and the sidebar grows a **👥 Provision a user** panel — username, full name, temporary password, role. No other role ever sees it, and the API would 403 them anyway. The role picker doubles as a permission preview (`N of 9 policy scopes`).
+- No user deprovisioning endpoint — accounts cannot be disabled or deleted via the API.
+- LLM request timeout is currently set high (600s); tightening this is a planned optimization.
+- `RERANK_CANDIDATE_K` is larger than strictly necessary for the current 9-document corpus.
+- CORS is currently limited to `localhost:8501`; the frontend's actual port (`8502`) needs to be added to avoid browser CORS warnings.
 
-Roles map to a fixed set of policy categories in [`rbac.py`](src/hr_rag/api/core/rbac.py), enforced at the retrieval layer, not just at the route:
+---
 
-| Role | Searchable policy categories |
-|---|---|
-| `employee` | leave, conduct, recruitment, it, operations |
-| `manager` | the above + performance |
-| `finance_user` | the above + finance |
-| `hr_admin` | all nine, including compensation and legal |
+## License
 
-A request for an out-of-scope category is answered with the reply "not available for your role" and zero sources, rather than a 4xx.
+MIT — see [LICENSE](LICENSE) for details.
 
-## Security model
+---
 
-- bcrypt password hashing; JWTs carry `sub/type/jti`, signature verified on every call
-- Refresh tokens are **single-use and stored hashed** — a stolen token can't be replayed after rotation
-- Roles map to category allow-lists (`rbac.py`); compensation stays manager+ / hr_admin only
-- Placeholder `JWT_SECRET_KEY` refuses to boot
-- CORS restricted to known frontend origins
+## Author
 
-## Evaluation
-
-An evaluation set ([`data/eval/qa_dataset.py`](data/eval/qa_dataset.py)) keeps the system honest — questions tagged by category, difficulty and type (numeric / factual / multi-hop / paraphrase / unanswerable), each with ground-truth answers verified against the source documents, including deliberately unanswerable ones to catch hallucination. [`notebooks/experiments.ipynb`](notebooks/experiments.ipynb) compares baseline, hybrid, query-rewrite, multi-query, compression, metadata-filter, HyDE and cross-encoder retrieval with RAGAS (faithfulness, context precision/recall). Winning setup shipped in this repo: **hybrid BM25+dense over per-category Qdrant collections**.
-
-## Observability
-
-MLflow tracks the offline retrieval experiments.
-
-Every `/query` request runs as a single `hr-rag-request` trace (root run tagged with `role` and `category` metadata); the guardrail chains and the retrieve-then-answer chain nest underneath it, so each step — prompt, LLM, parser — is visible in one trace per request. Set `LANGCHAIN_API_KEY`/`LANGSMITH_API_KEY` to enable it; with no key, tracing stays off.
-
-Query volume, end-to-end latency, cache hits, auth outcomes, RBAC denials, and LLM calls/fallbacks are visible via the API responses and the Streamlit client (latency + cache badge per answer).
-
-## Reliability
-
-- **LLM failover**: every LLM call goes through a **LiteLLM `Router`** ([`llm.py`](src/hr_rag/llm.py)) — Groq is primary, Gemini the fallback, and the router retries the failing provider 3× before switching over, so a provider outage no longer hard-fails `/query`. Model names come from `GROQ_MODEL` / `GOOGLE_MODEL`.
-- **DB setup**: the ORM layer runs on SQLite locally and PostgreSQL in Docker by toggling `DATABASE_URL`; tables are created automatically at startup (`init_db`), `psycopg` ships by default.
-- **Qdrant server mode**: `QDRANT_URL` points at the compose qdrant service (dashboard on `:6333/dashboard`); multi-process-safe, vs. the single-process embedded mode when unset.
-
-## Testing & layout
-
-**61 tests** — self-contained: `54` unit (auth/RBAC, routing, chunking, dataset integrity) + **7 end-to-end integration** over the wired routers (signup → login → refresh rotation → single-use replay rejection → RBAC enforcement), all with SQLite + `RATE_LIMIT_ENABLED=false` (no Redis/keys needed). CI runs ruff + pytest on every push/PR.
-
-```text
-data/policies, data/eval   corpus + eval set
-src/hr_rag                 RAG library (load/chunk/embed/route/retrieve/pipeline)
-src/hr_rag/api             FastAPI service (auth, rbac, cache, rate limit, guardrails, routes)
-frontend/app.py            Streamlit client
-scripts/ingest.py          builds Qdrant collections offline
-tests/, docker/, docs      suite, compose stack, deploy notes
-render.yaml, run-hr.bat    deploy + one-click local launch
-```
-
-## Deployment
-
-[`render.yaml`](render.yaml) + [`docs/deploy.md`](docs/deploy.md) lay out a managed stack (Postgres, Redis, Qdrant cluster, API on Render/Railway). `run-hr.bat` is a one-click local launcher that runs the API on `:8001` and UI on `:8502` (side-by-side with projects that own 8000/8501) under `API_URL`.
-
-## Known gaps
-
-Single-tenant auth (no external IdP/SSO), no LLM **circuit breaker** (retry + failover exist, breaker is for higher-traffic prod). Accounts can be created but not edited — there is no deprovisioning or role-change endpoint yet. Tracked for the next iteration.
+**Shoaib** ([@DataShoaib](https://github.com/DataShoaib))
