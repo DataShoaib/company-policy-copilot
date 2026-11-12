@@ -21,6 +21,11 @@ LLM_TEMPERATURE = 0
 DEFAULT_TOP_K = 3
 RERANK_CANDIDATE_K = 5
 
+# Hybrid retrieval weight (BM25 share; dense gets 1 - this). Eval final:
+# hybrid 0.5 beat vector-only on faithfulness 0.93/0.83, ctx precision
+# 0.75/0.37, recall 0.80/0.60, correctness 0.42/0.38 at ~baseline latency.
+HYBRID_BM25_WEIGHT = 0.5
+
 CATEGORIES = [
     "leave", "compensation", "conduct", "performance", "recruitment",
     "finance", "it", "legal", "operations",
