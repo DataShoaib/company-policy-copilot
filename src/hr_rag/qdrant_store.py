@@ -8,9 +8,12 @@ from hr_rag.embeddings import get_embeddings
 def get_qdrant_client() -> QdrantClient:
     from hr_rag.api.core.settings import settings
 
-    if settings.qdrant_url:
-        return QdrantClient(url=settings.qdrant_url, api_key=settings.qdrant_api_key or None)
-    return QdrantClient(path=str(settings.qdrant_path))
+    if not settings.qdrant_url:
+        raise RuntimeError(
+            "QDRANT_URL is not set. Provide a remote Qdrant cluster URL "
+            "(e.g. https://<cluster>.qdrant.io) via .env or environment variable."
+        )
+    return QdrantClient(url=settings.qdrant_url, api_key=settings.qdrant_api_key or None)
 
 
 def collection_name(category: str) -> str:

@@ -1,5 +1,4 @@
 import re
-from collections import Counter
 
 from langchain_core.documents import Document
 from langchain_core.output_parsers import StrOutputParser
@@ -96,23 +95,17 @@ def pipeline_is_loaded() -> bool:
 def get_pipeline() -> HRPolicyRAGPipeline:
     global _pipeline_singleton
     if _pipeline_singleton is None:
-        from hr_rag.chunking import chunk_documents
-        from hr_rag.data_loading import load_policy_documents
-        docs = load_policy_documents()
-        chunks = chunk_documents(docs)
-
-        from hr_rag.qdrant_store import (
-            build_category_collections,
-            load_category_collections,
-        )
+        from hr_rag.qdrant_store import load_category_collections
 
         category_stores = load_category_collections()
-        expected = Counter(chunk.metadata.get("category") for chunk in chunks)
-        if set(category_stores) != set(CATEGORIES) or any(
-            category_stores[category].count() != expected[category] for category in CATEGORIES
-        ):
-            category_stores = build_category_collections(chunks, force=True)
-        bm25_index = build_hybrid_index(chunks)
+        missing = [c for c in CATEGORIES if c not in category_stores]
+        if missing:
+            raise RuntimeError(
+                f"Qdrant collections missing on remote cluster: {missing}. "
+                "Ensure the remote Qdrant cluster is provisioned with all "
+                "policy-category collections before starting the API."
+            )
+        bm25_index = build_hybrid_index([])
         _pipeline_singleton = HRPolicyRAGPipeline(
             category_stores, bm25_index=bm25_index
         )

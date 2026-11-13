@@ -9,14 +9,13 @@ class Settings(BaseSettings):
     access_token_expire_minutes: int = 30
     refresh_token_expire_days: int = 7
 
-    database_url: str = "sqlite:///data/hr_policy.db"
+    database_url: str = ""
 
     redis_url: str = "redis://localhost:6379/0"
     cache_ttl_seconds: int = 3600
 
     qdrant_url: str = ""
     qdrant_api_key: str = ""
-    qdrant_path: str = "data/qdrant"
     qdrant_collection_prefix: str = "company_"
 
     rate_limit_per_minute: int = 20
