@@ -4,6 +4,10 @@ DB table creation + demo-user seeding used to run at `import users` time as a
 module side effect. That made importing the package write to the DB even for
 tests that only touch JWT or routing. It's now done here once per session so
 auth tests get the demo users they rely on, without spurious writes on import.
+
+If DATABASE_URL is not set (no remote PostgreSQL configured), DB seeding is
+skipped — tests that need the DB will fail with a clear message instead of
+crashing at import time.
 """
 
 import os
@@ -18,6 +22,12 @@ import pytest
 
 @pytest.fixture(scope="session", autouse=True)
 def _ensure_db_seeded():
+    from hr_rag.api.core.settings import settings
+
+    if not settings.database_url:
+        yield
+        return
+
     from hr_rag.api.core.database import init_db
     from hr_rag.api.core.users import seed_demo_users
 
