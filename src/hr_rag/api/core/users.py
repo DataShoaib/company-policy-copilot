@@ -4,7 +4,7 @@ from sqlalchemy import BigInteger, String, delete, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Mapped, mapped_column
 
-from hr_rag.api.core.database import Base, SessionLocal
+from hr_rag.api.core.database import Base, get_session_local
 from hr_rag.api.core.rbac import VALID_ROLES
 from hr_rag.api.core.security import hash_password, verify_password
 
@@ -32,6 +32,10 @@ class ConsumedRefreshToken(Base):
     expires_at: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True)
 
 
+def _session_local():
+    return get_session_local()()
+
+
 def consume_refresh_jti(jti: str, exp: float | None, ttl_fallback_seconds: int) -> bool:
     """Atomically claim a refresh-token JTI.
 
@@ -42,7 +46,7 @@ def consume_refresh_jti(jti: str, exp: float | None, ttl_fallback_seconds: int) 
     now = int(datetime.now(timezone.utc).timestamp())
     expires_at = int(exp) if exp else now + ttl_fallback_seconds
 
-    with SessionLocal() as db:
+    with _session_local() as db:
         # Opportunistic purge: rows past their token's expiry are dead weight.
         db.execute(delete(ConsumedRefreshToken).where(ConsumedRefreshToken.expires_at <= now))
         db.add(ConsumedRefreshToken(jti=jti, expires_at=expires_at))
@@ -64,7 +68,7 @@ def _as_dict(user: User) -> dict:
 
 
 def get_user(username: str) -> dict | None:
-    with SessionLocal() as db:
+    with _session_local() as db:
         user = db.scalar(select(User).where(User.username == username))
         return _as_dict(user) if user else None
 
@@ -83,7 +87,7 @@ def register_user(username: str, password: str, full_name: str, role: str) -> di
         hashed_password=hash_password(password),
         role=role,
     )
-    with SessionLocal() as db:
+    with _session_local() as db:
         if db.scalar(select(User).where(User.username == normalized_username)) is not None:
             raise ValueError("Username already exists")
         db.add(user)
